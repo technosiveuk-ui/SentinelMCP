@@ -5,6 +5,19 @@ All notable changes to SentinelMCP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Inline SDK (`sdk/` package)** — ergonomic builder over `gateway/` and the orchestration adapter for in-process enforcement: `sdk.New(invoker).WithRisk(...).StrictDefaults().Build()`. Ships `FuncInvoker` (secure plain Go functions as tools) and convenience constructors (`BuiltinDLP`, `StdoutAudit`, `CLIApproval`, `WebhookApproval`), so most users import only `sdk`.
+- `StrictDefaults()` builder method — raises the default risk to medium so unrecognized tools adopt a redact posture.
+- `gateway.ScanArgs` — field-attributed argument DLP scanning: findings carry their argument field name, so a redact decision masks the sensitive field. Credential-named fields (`password`, `api_key`, …) are flagged by name as well as by value.
+- `examples/inline-sdk` runnable demo (allow / redact / interrupt flows) and `docs/INLINE-SDK.md` guide.
+
+### Fixed
+
+- `default_risk` is now honored for unknown tools: `YAMLRiskDB.Lookup` returns the configured default on a miss. Previously the inspect node hardcoded `low` for tools with no explicit entry, making `default_risk` — and therefore `StrictDefaults()` — ineffective.
+
 ## [0.1.0] - 2026-06-12
 
 ### Added
@@ -58,4 +71,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Interrupt | 33μs | 303 |
 | DLP scan | 9.3μs | 0 |
 
+[Unreleased]: https://github.com/technosiveuk-ui/sentinelmcp/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/technosiveuk-ui/sentinelmcp/releases/tag/v0.1.0
