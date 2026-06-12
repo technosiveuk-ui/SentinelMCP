@@ -10,6 +10,16 @@ Built by [Technosive Ltd.](https://technosive.com)
 
 ---
 
+> ⚠️ **Alpha Software — v0.1**
+>
+> SentinelMCP is currently in **Alpha**. The project is under active development and APIs, configuration formats, and graph behaviors **may change** in future releases without advance notice.
+>
+> **Production warning:** This software is provided as-is. While we strive for security, an Alpha-stage proxy should **not** be your sole defense in a highly regulated production environment without thorough testing. Use at your own risk.
+>
+> We actively seek early adopters and feedback. If you encounter issues, have suggestions, or want to contribute — please [open an issue](https://github.com/technosiveuk-ui/SentinelMCP/issues). Your input directly shapes the roadmap.
+
+---
+
 ## What is SentinelMCP?
 
 SentinelMCP is a security enforcement engine for the **Model Context Protocol (MCP)** that secures AI agent tool calls at runtime. It provides inspection, policy enforcement, PII/secret redaction, and audit logging — sitting between your AI agents and the tools they invoke.
