@@ -327,6 +327,15 @@ Signed-off-by: Your Name <your.email@example.com>
 
 ---
 
-## License
+## License, Trademark & Extensibility
 
-SentinelMCP is licensed under the [Apache 2.0 License](LICENSE). Copyright 2024-2026 Technosive Ltd.
+**Open Source Code:**
+The code in this repository, including the `gateway/` interfaces and `adapter/` implementations, is licensed under the [Apache 2.0 License](LICENSE). You are free to use, modify, and distribute this code in accordance with that license.
+
+**Enterprise Extensions & Interface Implementations:**
+This repository defines extensibility interfaces (e.g., `Policy`, `DLPScanner`, `ApprovalProvider`, `AuditEmitter`) in the `gateway/` package to allow for custom integrations. While the interfaces themselves are Apache 2.0, **proprietary implementations of these interfaces provided by Technosive Ltd.** (such as the SentinelMCP Enterprise Control Plane, corporate communication HITL integrations, and advanced DLP connectors) are licensed separately under a commercial license and are not included in this repository.
+
+Implementing these interfaces in your own code does not require you to license your implementations under Apache 2.0, nor does it obligate you to open-source your custom integrations.
+
+**Trademark:**
+"SentinelMCP" and the SentinelMCP logo are trademarks of Technosive Ltd. The Apache 2.0 license does not grant you the right to use the SentinelMCP trademark to endorse or promote products or services derived from this software without prior written permission from Technosive Ltd.
