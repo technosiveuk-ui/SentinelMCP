@@ -89,44 +89,61 @@ This architectural boundary provides three major benefits:
 **1. Start the sidecar with Docker:**
 
 ```bash
-docker run -p 8080:8080 -p 9090:9090 \
+docker run --name sentinelmcp \
+  -p 8080:8080 -p 9090:9090 \
   -v ./policies.yaml:/etc/sentinelmcp/config.yaml \
   ghcr.io/technosiveuk-ui/sentinelmcp:latest
 ```
 
-**2. Define your policies (`policies.yaml`):**
+Port `8080` is the MCP proxy; `9090` is the admin API (health checks and the approval-resume endpoint used by high-risk interrupts). Add `-d` to run detached, then follow logs with `docker logs -f sentinelmcp`.
+
+**2. Define your policy (`policies.yaml`):**
 
 ```yaml
 schema_version: "1.0"
 
 global:
-  default_risk: low
+  default_risk: low                 # risk for tools with no explicit entry (set medium for a stricter default)
   redaction_mask: "***REDACTED***"
 
 sidecar:
   listen_addr: ":8080"
   health_addr: ":9090"
   transport: streamable_http
-  upstream_servers:
+  upstream_servers:                 # your MCP tool servers — at least one is required
     - name: my-tools
       url: "http://localhost:3001/mcp"
 
 tools:
   read_file:
-    risk: medium                    # DLP scans args + response
+    risk: low                       # allow — args and response are still DLP-scanned
     redact_patterns: [PASSWORD, API_KEY]
 
+  write_file:
+    risk: medium                    # redact — sensitive argument fields are masked before the tool runs
+
   exec_command:
-    risk: high                      # Interrupts for human approval
+    risk: high                      # interrupt — pauses for human approval, then runs or blocks
     require_approval: true
     approval_reason: "Shell commands can modify system state"
 
-  "db_*":                           # Glob matching supported
+  "db_*":                           # glob patterns are supported
     risk: high
     require_approval: true
+
+dlp_patterns:                       # six patterns are built in (PRIVATE_KEY, PASSWORD, API_KEY,
+  INTERNAL_HOSTNAME:                # CREDIT_CARD, SSN, EMAIL); define your own here as needed
+    regex: '\b[a-z]+\.internal\.company\.com\b'
+    type: pii
 ```
 
-**3. Route your agent's MCP traffic to `localhost:8080`.**
+**3. Point your MCP client at the proxy:**
+
+```text
+http://localhost:8080/mcp
+```
+
+The proxy speaks standard Streamable HTTP MCP, so any client — Python, TypeScript, or Go — connects to that URL with no SDK changes. Point `upstream_servers` at your own MCP tool server(s) and the proxy enforces the policy above on every call.
 
 ### Inline SDK Mode
 
