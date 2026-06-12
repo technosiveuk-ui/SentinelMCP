@@ -10,6 +10,6 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o testclient ./cmd/testclient
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM alpine:3.21
 COPY --from=builder /build/testclient /usr/local/bin/testclient
 ENTRYPOINT ["testclient"]

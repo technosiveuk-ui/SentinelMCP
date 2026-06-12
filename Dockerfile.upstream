@@ -10,7 +10,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o upstream ./cmd/upstream
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM alpine:3.21
+RUN apk add --no-cache netcat-openbsd
 COPY --from=builder /build/upstream /usr/local/bin/upstream
 EXPOSE 3001
 ENTRYPOINT ["upstream"]

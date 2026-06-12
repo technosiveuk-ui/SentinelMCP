@@ -2,7 +2,7 @@
 # SentinelMCP Sidecar — multi-stage Docker build
 # ---------------------------------------------------------------------------
 # Stage 1: Build the binary with CGO disabled (static linking).
-# Stage 2: Copy to distroless/static for minimal image (~10-15MB).
+# Stage 2: Copy to alpine for minimal image with healthcheck support.
 # ---------------------------------------------------------------------------
 
 FROM golang:1.26-alpine AS builder
@@ -15,10 +15,11 @@ COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o sentinelmcp ./cmd/sentinelmcp
 
 # ---------------------------------------------------------------------------
-# Runtime: distroless for minimal attack surface (TR-02: no CGO, no shell).
+# Runtime: alpine for minimal image with wget (healthcheck support).
+# For production distroless builds, use the distroless Dockerfile variant.
 # ---------------------------------------------------------------------------
-FROM gcr.io/distroless/static-debian12:nonroot
-
+FROM alpine:3.21
+RUN apk add --no-cache wget ca-certificates
 COPY --from=builder /build/sentinelmcp /usr/local/bin/sentinelmcp
 COPY config/docker-config.yaml /etc/sentinelmcp/config.yaml
 

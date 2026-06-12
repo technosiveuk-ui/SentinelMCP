@@ -15,10 +15,10 @@ services:
     ports:
       - "3001:3001"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/mcp"]
+      test: ["CMD", "nc", "-z", "localhost", "3001"]
       interval: 2s
       timeout: 3s
-      retries: 10
+      retries: 15
       start_period: 3s
 
   sidecar:
@@ -34,7 +34,7 @@ services:
     environment:
       - SENTINELMCP_CONFIG=/etc/sentinelmcp/config.yaml
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/healthz"]
       interval: 2s
       timeout: 3s
       retries: 10
