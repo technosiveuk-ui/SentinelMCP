@@ -68,6 +68,20 @@ This dual-mode architecture is SentinelMCP's key differentiator: competitors lik
 
 ---
 
+## 🏗️ Architecture & Extensibility
+
+SentinelMCP is built with a strict separation of concerns to ensure maintainability, testability, and a seamless Open-Core experience.
+
+The `gateway/` package defines all core interfaces and domain types (Policy, DLP, Risk, Audit) with **zero dependencies** on the underlying Eino framework or MCP transport libraries. The `adapter/eino/` package is the *only* package that imports Eino types.
+
+This architectural boundary provides three major benefits:
+
+1. **Framework Agnostic:** If the underlying orchestration framework ever needs to change, only a new adapter is required; the core security engine remains untouched.
+2. **Independently Testable:** Core domain logic (policy evaluation, DLP redaction, risk analysis) can be unit-tested cleanly without spinning up MCP servers or LLM graphs.
+3. **Architecturally Enforced Open-Core:** Enterprise implementations (Teams/Slack HITL, Nightfall DLP, Control Plane APIs) simply swap into the `GatewayConfig` via interfaces. Zero changes to this OSS codebase are required.
+
+---
+
 ## Quickstart
 
 ### Proxy Mode
@@ -244,14 +258,6 @@ sentinelmcp/
     ├── config.yaml        # Default config
     └── docker-config.yaml # Docker-specific config
 ```
-
-### Anti-Corruption Layer
-
-The `gateway/` package defines all interfaces and domain types with **zero dependencies on Eino or MCP libraries**. The `adapter/eino/` package is the only one that imports Eino types. This means:
-
-- If SentinelMCP ever needs a different orchestration framework, a new adapter is created alongside
-- Core domain logic (policy, DLP, risk, audit) is independently testable
-- The open-core boundary is architecturally enforced: Enterprise implementations swap into `GatewayConfig` without code changes
 
 ---
 
