@@ -28,7 +28,7 @@ Built by [Technosive Ltd.](https://technosive.co.uk)
 
 SentinelMCP is a security enforcement engine for the **Model Context Protocol (MCP)** that secures AI agent tool calls at runtime. It provides inspection, policy enforcement, PII/secret redaction, and audit logging — sitting between your AI agents and the tools they invoke.
 
-Built on the [Eino framework](https://github.com/cloudwego/eino) (Go) for high-performance graph orchestration with native interrupt/resume capabilities, enabling human-in-the-loop approval workflows without custom plumbing.
+Built in high-performance Go with runtime-native graph orchestration, interrupt/resume capabilities, and sub-millisecond enforcement — enabling human-in-the-loop approval workflows without custom plumbing.
 
 ---
 
@@ -44,9 +44,9 @@ A standalone sidecar binary that intercepts HTTP/SSE MCP traffic. Works with **a
 AI Agent (any language) → SentinelMCP Proxy → MCP Server
 ```
 
-### 2. Inline SDK Mode (Go/Eino Native)
+### 2. Inline SDK Mode (Go Native)
 
-A Go library imported directly into your application. Wraps MCP tool calls **in-memory** using Eino graph orchestration. Provides sub-millisecond latency and deep context awareness — no network hop, no separate process.
+A Go library imported directly into your application. Wraps MCP tool calls **in-memory** with zero-copy graph orchestration. Provides sub-millisecond latency and deep context awareness — no network hop, no separate process.
 
 ```
 Go AI Application → SentinelMCP SDK (in-process) → MCP Server

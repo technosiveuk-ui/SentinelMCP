@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 **Sprint 1 — Core Gateway (Weeks 3-6)**
-- Gateway pipeline with 3-node Eino graph: inspect_tool_call → run_tool → inspect_tool_response
+- Gateway pipeline with 3-node security graph: inspect_tool_call → run_tool → inspect_tool_response
 - `Policy` interface with `DefaultPolicy` (risk-level routing: low→allow, medium→redact, high→interrupt)
 - `RiskDB` interface with `YAMLRiskDB` (exact match + glob patterns, hot-reloadable)
 - `DLPScanner` interface with `RegexDLPScanner` (6 built-in patterns: private keys, passwords, API keys, credit cards, SSNs, emails)
