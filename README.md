@@ -257,8 +257,8 @@ The `gateway/` package defines all interfaces and domain types with **zero depen
 |:--------|:------------------------------|:-------------------------|
 | **Deployment** | Sidecar Proxy + Inline Go SDK | Centralized Control Plane |
 | **Policies** | Local YAML with hot-reload | Centralized API/DB, Web UI |
-| **DLP** | Regex-based (6 built-in + custom) | Nightfall, Palantir, Symantec connectors |
-| **HITL Approval** | Generic Webhook + CLI | Slack, Teams, Email Adaptive Cards |
+| **DLP** | Regex-based (6 built-in + custom) | Enterprise DLP connectors (API-based) |
+| **HITL Approval** | Generic Webhook + CLI | Corporate communication channels |
 | **Audit** | JSON stdout + OTel | SIEM Aggregation, Compliance PDFs |
 | **Auth** | None (single-tenant) | SSO, RBAC, multi-tenant |
 | **State** | BoltDB (local) | Distributed (Postgres) |
