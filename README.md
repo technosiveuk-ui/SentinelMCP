@@ -10,7 +10,7 @@ Built by [Technosive Ltd.](https://technosive.co.uk)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](go.mod)
-[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-green?logo=github-actions)](#)
+[![CI](https://github.com/technosiveuk-ui/SentinelMCP/actions/workflows/ci.yml/badge.svg)](https://github.com/technosiveuk-ui/SentinelMCP/actions/workflows/ci.yml)
 
 ---
 
