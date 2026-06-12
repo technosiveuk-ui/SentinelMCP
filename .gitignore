@@ -1,6 +1,7 @@
 # Binaries
 /demo
 /sentinelmcp
+/inline-sdk
 *.exe
 *.exe~
 *.dll

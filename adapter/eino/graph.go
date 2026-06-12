@@ -22,7 +22,6 @@ package eino
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -372,16 +371,10 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 			return nil, fmt.Errorf("adapter/eino: inspect_tool_call received nil input")
 		}
 
-		// 1. Serialize args for DLP scanning.
-		argsJSON, err := json.Marshal(gc.Args)
-		if err != nil {
-			gc.Blocked = true
-			gc.Reason = fmt.Sprintf("serialize args: %v (default-deny NFR-07)", err)
-			return gc, nil
-		}
-
-		// 2. DLP scan the arguments.
-		findings, err := cfg.DLPScanner.Scan(ctx, string(argsJSON))
+		// 1. DLP scan the arguments field-by-field. Each finding is attributed
+		//    to its argument name so that, on a "redact" decision, RedactArgs
+		//    masks exactly the sensitive field instead of an opaque JSON blob.
+		findings, err := gateway.ScanArgs(ctx, cfg.DLPScanner, gc.Args)
 		if err != nil {
 			gc.Blocked = true
 			gc.Reason = fmt.Sprintf("DLP scan failed: %v (default-deny NFR-07)", err)
@@ -389,21 +382,21 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 		}
 		gc.Findings = findings
 
-		// 2b. Record DLP findings to metrics.
+		// 1b. Record DLP findings to metrics.
 		if cfg.MetricsRecorder != nil {
 			for _, f := range findings {
 				cfg.MetricsRecorder.RecordDLPFinding(ctx, f)
 			}
 		}
 
-		// 3. Risk lookup from RiskDB. Default to low if not found.
-		risk, found := cfg.RiskDB.Lookup(gc.ToolName)
-		if !found {
-			risk = gateway.ToolRisk{Level: gateway.RiskLow}
-		}
+		// 2. Risk lookup from RiskDB. Lookup always returns a usable risk —
+		//    the configured default when the tool has no explicit entry — so a
+		//    medium default (e.g. StrictDefaults) routes unrecognized tools to
+		//    redact rather than silently allowing them.
+		risk, _ := cfg.RiskDB.Lookup(gc.ToolName)
 		gc.Risk = &risk
 
-		// 4. Call Policy.Decide.
+		// 3. Call Policy.Decide.
 		callCtx := gateway.ToolCallContext{
 			ToolName: gc.ToolName,
 			Args:     gc.Args,
@@ -433,7 +426,7 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 		}
 		gc.Decision = decision
 
-		// 5. Route based on decision.
+		// 4. Route based on decision.
 		switch decision.Decision {
 		case gateway.DecisionAllow:
 			_ = cfg.AuditEmitter.Emit(ctx, gateway.AuditEvent{

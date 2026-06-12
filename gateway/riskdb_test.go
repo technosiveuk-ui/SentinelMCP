@@ -79,9 +79,26 @@ func TestYAMLRiskDB_NoMatch_ReturnsDefault(t *testing.T) {
 		ToolRisk{Level: RiskLow},
 	)
 
-	_, found := db.Lookup("unknown_tool")
+	// Missed lookups report found=false but still return the configured default,
+	// so default_risk flows through to the policy decision (rather than a zero
+	// value the caller must remember to replace).
+	risk, found := db.Lookup("unknown_tool")
 	if found {
-		t.Error("expected no match for unknown_tool")
+		t.Error("expected no explicit match for unknown_tool")
+	}
+	if risk.Level != RiskLow {
+		t.Errorf("expected default RiskLow on miss, got %s", risk.Level)
+	}
+
+	// A non-low default must also be returned verbatim on a miss — this is what
+	// makes StrictDefaults (medium default) route unrecognized tools to redact.
+	strict := NewYAMLRiskDB(nil, ToolRisk{Level: RiskMedium})
+	risk, found = strict.Lookup("anything_unknown")
+	if found {
+		t.Error("expected no explicit match against an empty risk DB")
+	}
+	if risk.Level != RiskMedium {
+		t.Errorf("expected default RiskMedium on miss, got %s", risk.Level)
 	}
 }
 

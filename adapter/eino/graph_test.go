@@ -174,6 +174,36 @@ func TestPipeline_MediumRisk_Redact(t *testing.T) {
 	}
 }
 
+func TestPipeline_MediumRisk_RedactsSensitiveArgs(t *testing.T) {
+	// Medium-risk tools route to "redact". Sensitive argument fields must be
+	// masked before the tool is invoked, while clean fields pass through. This
+	// is the end-to-end proof that field-attributed scanning (ScanArgs) feeds
+	// RedactArgs — without it, the redact decision was decorative.
+	invoker := &recordingInvoker{}
+	cfg, _ := testConfig(invoker)
+	pipeline, err := BuildGraph(cfg)
+	if err != nil {
+		t.Fatalf("BuildGraph error: %v", err)
+	}
+
+	_, err = pipeline.Run(context.Background(), "filesystem_read", map[string]any{
+		"path": "/etc/hosts",
+		"ssn":  "123-45-6789",
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(invoker.calls) != 1 {
+		t.Fatalf("expected 1 invocation, got %d", len(invoker.calls))
+	}
+	if invoker.calls[0].args["ssn"] != "***" {
+		t.Errorf("expected ssn masked, got %v", invoker.calls[0].args["ssn"])
+	}
+	if invoker.calls[0].args["path"] != "/etc/hosts" {
+		t.Errorf("expected clean 'path' to pass through, got %v", invoker.calls[0].args["path"])
+	}
+}
+
 func TestPipeline_HighRisk_InterruptAndApprove(t *testing.T) {
 	invoker := &recordingInvoker{}
 	cfg, _ := testConfig(invoker)

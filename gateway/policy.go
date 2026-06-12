@@ -118,9 +118,10 @@ func redactedFields(args map[string]any, findings []DLPFinding) map[string]strin
 // OSS extension point: the OSS sidecar ships YAMLRiskDB (static YAML config).
 // Enterprise implementations add dynamic risk scoring via the commercial Control Plane.
 type RiskDB interface {
-	// Lookup returns the ToolRisk for a tool.
-	// The bool indicates whether the tool was found.
-	// If false, the caller should use the global default risk.
+	// Lookup returns the ToolRisk for a tool. The returned value is always
+	// usable: an explicit (exact or glob) entry when found, or the configured
+	// default risk otherwise. The bool indicates an explicit match — callers
+	// that only need the level can ignore it and route on the returned ToolRisk.
 	Lookup(toolName string) (ToolRisk, bool)
 }
 
@@ -174,7 +175,11 @@ func (db *YAMLRiskDB) Lookup(toolName string) (ToolRisk, bool) {
 		}
 	}
 
-	return ToolRisk{}, false
+	// No explicit or glob match: return the configured default. Returning it
+	// here (rather than a zero value) makes default_risk actually take effect —
+	// callers route on the returned level, so the default flows through to the
+	// policy decision. found stays false to signal "no explicit entry".
+	return db.default_, false
 }
 
 // hasGlob returns true if the string contains glob metacharacters.

@@ -15,6 +15,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"sort"
 	"sync"
@@ -227,4 +228,70 @@ func RedactArgs(args map[string]any, result *DecisionResult, mask string) map[st
 		}
 	}
 	return redacted
+}
+
+// ---------------------------------------------------------------------------
+// ScanArgs — field-attributed argument scanning
+// ---------------------------------------------------------------------------
+
+// ScanArgs scans tool arguments field-by-field and stamps every finding with
+// the argument name it came from (DLPFinding.Field). This is what makes
+// argument-level redaction work: on a "redact" decision, redactedFields keys
+// off Field, so findings must carry it. Scanning one opaque JSON blob (as the
+// graph used to) loses the field boundary and leaves RedactedArgs empty.
+//
+// Each argument is rendered as "name=value" before scanning. The "name=" prefix
+// is deliberate: the built-in PASSWORD / API_KEY patterns match on a credential
+// key adjacent to a separator (e.g. "password=hunter2", "api_key=..."), so a
+// field literally named "password" is still caught even when its value matches
+// no value-side pattern (SSN, card, email, private key).
+//
+// Keys are scanned in sorted order for stable audit output. Findings keep their
+// pattern-relative positions; arg redaction only uses Field, so positions are
+// not meaningful here (response redaction, which does use positions, scans the
+// response string directly via DLPScanner.Scan).
+func ScanArgs(ctx context.Context, scanner DLPScanner, args map[string]any) ([]DLPFinding, error) {
+	if len(args) == 0 {
+		return []DLPFinding{}, nil
+	}
+
+	names := make([]string, 0, len(args))
+	for name := range args {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var findings []DLPFinding
+	for _, name := range names {
+		rendered := name + "=" + argToString(args[name])
+		fieldFindings, err := scanner.Scan(ctx, rendered)
+		if err != nil {
+			return nil, fmt.Errorf("gateway: scan argument %q: %w", name, err)
+		}
+		for i := range fieldFindings {
+			fieldFindings[i].Field = name
+			findings = append(findings, fieldFindings[i])
+		}
+	}
+	if findings == nil {
+		findings = []DLPFinding{}
+	}
+	return findings, nil
+}
+
+// argToString renders an argument value for regex scanning. Strings are used
+// verbatim; other values use fmt.Sprint. The Sprint form keeps credential keys
+// adjacent to a separator the built-in patterns expect — a nested map renders as
+// map[password:x] (note the ":"), whereas JSON-marshalling would insert a quote
+// (password":"x) and break the pattern. Go's fmt sorts map keys, so output is
+// deterministic.
+func argToString(v any) string {
+	switch v := v.(type) {
+	case string:
+		return v
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(v)
+	}
 }

@@ -130,7 +130,7 @@ tools:
 
 ### Inline SDK Mode
 
-**1. Import the SDK into your Go application:**
+Secure tool calls **in-process** with a small builder API — no sidecar, no network hop, sub-millisecond overhead. Full guide: [`docs/INLINE-SDK.md`](docs/INLINE-SDK.md).
 
 ```go
 package main
@@ -141,37 +141,29 @@ import (
     "log"
 
     "github.com/technosiveuk-ui/sentinelmcp/gateway"
-    "github.com/technosiveuk-ui/sentinelmcp/adapter/eino"
+    "github.com/technosiveuk-ui/sentinelmcp/sdk"
 )
 
 func main() {
-    // Define policies
-    riskDB := gateway.NewYAMLRiskDB(map[string]gateway.ToolRisk{
-        "read_file":    {Level: gateway.RiskMedium},
-        "exec_command": {Level: gateway.RiskHigh, RequireApproval: true},
-    }, gateway.ToolRisk{Level: gateway.RiskLow})
+    // Register plain Go functions as secured tools.
+    invoker := sdk.NewFuncInvoker().
+        Register("read_file", func(_ context.Context, args map[string]any) (string, error) {
+            return fmt.Sprintf("contents of %v", args["path"]), nil
+        }).
+        Register("exec_command", func(_ context.Context, args map[string]any) (string, error) {
+            return fmt.Sprintf("ran %v", args["cmd"]), nil
+        })
 
-    // Build DLP scanner with built-in patterns
-    scanner, err := gateway.NewRegexDLPScanner(gateway.BuiltinPatterns())
+    // Build the pipeline. StrictDefaults routes unknown tools to redact.
+    pipeline, err := sdk.New(invoker).
+        WithRisk("exec_command", gateway.RiskHigh). // interrupt for approval
+        StrictDefaults().
+        Build()
     if err != nil {
         log.Fatal(err)
     }
 
-    // Configure and build the pipeline
-    cfg := gateway.GatewayConfig{
-        Policy:       gateway.NewDefaultPolicy(),
-        RiskDB:       riskDB,
-        DLPScanner:   scanner,
-        AuditEmitter: gateway.NewStdoutAuditEmitter(nil),
-        ToolInvoker:  myToolInvoker{}, // implements gateway.ToolInvoker
-    }
-
-    pipeline, err := eino.BuildGraph(cfg)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Execute a tool call through the secure pipeline
+    // Every call is inspected, DLP-scanned, policy-checked, and audited.
     result, err := pipeline.Run(context.Background(), "read_file", map[string]any{
         "path": "/etc/config.yaml",
     })
@@ -182,7 +174,11 @@ func main() {
 }
 ```
 
-**2. That's it.** Every tool call is now inspected, DLP-scanned, policy-checked, and audited — all in-process.
+Run the complete allow / redact / interrupt example:
+
+```bash
+go run ./examples/inline-sdk
+```
 
 ---
 
@@ -229,6 +225,10 @@ sentinelmcp/
 │   ├── audit_sink.go      # AuditSink + WriterAuditSink + CompositeAuditEmitter
 │   ├── metrics.go         # MetricsRecorder interface + NOPMetricsRecorder
 │   └── webhook_approval.go # WebhookApprovalProvider + CLIApprovalProvider
+├── sdk/                   # Inline SDK: ergonomic builder over gateway + adapter
+│   ├── builder.go         # Builder API (New, With*, StrictDefaults, Build)
+│   ├── func_invoker.go    # FuncInvoker — secure plain Go functions
+│   └── defaults.go        # Convenience constructors (BuiltinDLP, StdoutAudit, …)
 ├── adapter/eino/          # Eino framework adapter (ONLY package with Eino imports)
 │   ├── graph.go           # BuildGraph() → 3-node graph with interrupt/resume
 │   ├── otel_metrics.go    # OTelMetricsRecorder (counters + histograms)
@@ -252,6 +252,8 @@ sentinelmcp/
 │   ├── upstream/          # Demo upstream MCP server (3 tools)
 │   ├── testclient/        # Demo test client (3 enforcement flows)
 │   └── demo/              # In-process demo (4 MCP servers)
+├── examples/
+│   └── inline-sdk/        # Runnable allow/redact/interrupt SDK demo
 ├── Dockerfile             # Multi-stage distroless build
 ├── docker-compose.yml     # One-command demo
 └── config/
