@@ -100,7 +100,7 @@ By making a contribution to this project, I certify that:
 
 - Use GitHub Issues for bug reports and feature requests
 - Include Go version, OS, and steps to reproduce
-- For security vulnerabilities, please email security@technosive.com instead of opening a public issue
+- For security vulnerabilities, please email security@technosive.co.uk instead of opening a public issue
 
 ## License
 

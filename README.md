@@ -6,7 +6,7 @@
 
 **The Open-Source MCP Security Gateway for AI Agents**
 
-Built by [Technosive Ltd.](https://technosive.com)
+Built by [Technosive Ltd.](https://technosive.co.uk)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](go.mod)
