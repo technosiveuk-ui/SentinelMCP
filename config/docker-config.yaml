@@ -1,0 +1,48 @@
+# SentinelMCP Docker demo configuration
+# Uses Docker service names for networking.
+
+schema_version: "1.0"
+
+global:
+  default_risk: "low"
+  audit_output: "stdout"
+  redaction_mask: "***REDACTED***"
+
+sidecar:
+  listen_addr: ":8080"
+  health_addr: ":9090"
+  transport: "streamable_http"
+  upstream_servers:
+    - name: "demo-upstream"
+      url: "http://upstream:3001/mcp"
+
+tools:
+  echo_message:
+    risk: low
+  filesystem_read:
+    risk: medium
+  exec_command:
+    risk: high
+    require_approval: true
+    approval_reason: "Dangerous command execution requires approval"
+
+dlp:
+  patterns:
+    PRIVATE_KEY:
+      regex: '-----BEGIN[A-Z ]*PRIVATE KEY-----'
+      type: secret
+    PASSWORD:
+      regex: '(?i)(?:password|passwd|pwd|secret)\s*[=:]\s*\S+'
+      type: secret
+    API_KEY:
+      regex: '(?i)(?:api[_-]?key|apikey|access[_-]?token)\s*[=:]\s*\S+'
+      type: secret
+    CREDIT_CARD:
+      regex: '\b(?:4\d{12}\d{3}?|5[1-5]\d{14})\b'
+      type: pii
+    SSN:
+      regex: '\b\d{3}-\d{2}-\d{4}\b'
+      type: pii
+    EMAIL:
+      regex: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+      type: pii

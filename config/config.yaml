@@ -1,0 +1,114 @@
+# SentinelMCP — Default Policy Configuration
+# See docs/designs/2026-06-11-core-interfaces-and-dsl.md for full schema docs.
+
+schema_version: "1.0"
+
+global:
+  default_risk: low
+  audit_output: stdout
+  redaction_mask: "***REDACTED***"
+  default_dlp_patterns:
+    - PRIVATE_KEY
+    - PASSWORD
+  policy_defaults:
+    low: allow
+    medium: redact
+    high: interrupt_for_approval
+
+tools:
+  echo_message:
+    risk: low
+
+  filesystem_read:
+    risk: medium
+    redact_patterns:
+      - PRIVATE_KEY
+      - PASSWORD
+      - API_KEY
+
+  filesystem_write:
+    risk: high
+    require_approval: true
+    approval_reason: "File write operations can cause data loss"
+    redact_patterns:
+      - PRIVATE_KEY
+      - PASSWORD
+      - CREDIT_CARD
+
+  exec_command:
+    risk: high
+    require_approval: true
+    approval_reason: "Shell commands can modify system state"
+    redact_patterns:
+      - PRIVATE_KEY
+      - PASSWORD
+      - CREDIT_CARD
+
+  calculator:
+    risk: medium
+    redact_patterns:
+      - PRIVATE_KEY
+      - PASSWORD
+
+  "db_*":
+    risk: high
+    require_approval: true
+    approval_reason: "Database operations require approval"
+
+dlp_patterns: {}
+  # Built-in patterns (PRIVATE_KEY, PASSWORD, API_KEY, CREDIT_CARD, SSN, EMAIL)
+  # are available by default. Add custom patterns here:
+  #
+  # INTERNAL_HOSTNAME:
+  #   regex: '\b[a-z]+\.internal\.company\.com\b'
+  #   type: pii
+
+# ---------------------------------------------------------------------------
+# Sidecar proxy configuration (Phase 2)
+# ---------------------------------------------------------------------------
+
+sidecar:
+  listen_addr: "localhost:8080"
+  transport: "streamable_http"       # "stdio" | "streamable_http"
+  health_addr: "localhost:9090"
+  checkpoint_path: "./sentinelmcp-checkpoints.db"
+  upstream_servers: []
+    # - name: "echo"
+    #   url: "http://localhost:3001/mcp"
+    # - name: "filesystem"
+    #   url: "http://localhost:3002/mcp"
+
+# ---------------------------------------------------------------------------
+# SIEM audit sinks (Phase 2)
+# ---------------------------------------------------------------------------
+
+siem:
+  sinks: []
+    # - type: "file"
+    #   path: "/var/log/sentinelmcp/audit.jsonl"
+    #   max_size_mb: 100
+    #   max_backups: 5
+    #   compress: true
+    # - type: "splunk_hec"
+    #   endpoint: "https://splunk.example.com:8088/services/collector"
+    #   token: "${SPLUNK_HEC_TOKEN}"
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry metrics (Phase 2)
+# ---------------------------------------------------------------------------
+
+otel:
+  enabled: false
+  endpoint: "localhost:4317"
+  service_name: "sentinelmcp"
+  export_interval: "15s"
+
+# ---------------------------------------------------------------------------
+# Approval provider (Phase 2)
+# ---------------------------------------------------------------------------
+
+approval:
+  provider: "cli"                    # "cli" | "webhook"
+  webhook:
+    url: ""                          # set to enable webhook HITL
+    resume_base_url: "http://localhost:9090"

@@ -1,0 +1,35 @@
+# Binaries
+/demo
+/sentinelmcp
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+*.prof
+coverage.txt
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+/bin/
+/dist/
+
+# BoltDB checkpoint files (runtime artifacts)
+*.db

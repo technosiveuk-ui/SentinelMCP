@@ -1,0 +1,52 @@
+# SentinelMCP Docker Demo
+#
+# One-command demo: docker compose up --build --abort-on-container-exit
+#
+# Flow:
+#   1. upstream starts on :3001 with 3 demo tools
+#   2. sidecar discovers tools, starts proxy on :8080, admin on :9090
+#   3. test-client runs all 3 enforcement flows and exits 0/1
+
+services:
+  upstream:
+    build:
+      context: .
+      dockerfile: Dockerfile.upstream
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/mcp"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    depends_on:
+      upstream:
+        condition: service_healthy
+    environment:
+      - SENTINELMCP_CONFIG=/etc/sentinelmcp/config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  test-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.testclient
+    depends_on:
+      sidecar:
+        condition: service_healthy
+    environment:
+      - SENTINELMCP_URL=http://sidecar:8080/mcp
+      - SENTINELMCP_ADMIN_URL=http://sidecar:9090
