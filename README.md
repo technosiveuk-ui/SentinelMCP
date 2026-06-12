@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/sentinelguard-banner.jpg" alt="SentinelMCP — Protect. Detect. Prevent." width="600" />
+</div>
+
 # SentinelMCP
 
 **The Open-Source MCP Security Gateway for AI Agents**
