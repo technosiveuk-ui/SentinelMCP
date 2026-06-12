@@ -132,6 +132,8 @@ tools:
 
 Secure tool calls **in-process** with a small builder API — no sidecar, no network hop, sub-millisecond overhead. Full guide: [`docs/INLINE-SDK.md`](docs/INLINE-SDK.md).
 
+> **Requires v0.2.0+.** The Inline SDK (`sdk/` package) shipped in v0.2.0.
+
 ```go
 package main
 

@@ -10,10 +10,10 @@ This is the recommended integration for Go-based AI runtimes, gateways, and agen
 
 ## Install
 
-Requires **Go 1.26+**.
+Requires **Go 1.26+** and **SentinelMCP v0.2.0+** (the Inline SDK shipped in v0.2.0).
 
 ```bash
-go get github.com/technosiveuk-ui/sentinelmcp/sdk
+go get github.com/technosiveuk-ui/sentinelmcp/sdk@v0.2.0
 ```
 
 ```go

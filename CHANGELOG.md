@@ -7,16 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-12
+
 ### Added
 
 - **Inline SDK (`sdk/` package)** — ergonomic builder over `gateway/` and the orchestration adapter for in-process enforcement: `sdk.New(invoker).WithRisk(...).StrictDefaults().Build()`. Ships `FuncInvoker` (secure plain Go functions as tools) and convenience constructors (`BuiltinDLP`, `StdoutAudit`, `CLIApproval`, `WebhookApproval`), so most users import only `sdk`.
 - `StrictDefaults()` builder method — raises the default risk to medium so unrecognized tools adopt a redact posture.
 - `gateway.ScanArgs` — field-attributed argument DLP scanning: findings carry their argument field name, so a redact decision masks the sensitive field. Credential-named fields (`password`, `api_key`, …) are flagged by name as well as by value.
 - `examples/inline-sdk` runnable demo (allow / redact / interrupt flows) and `docs/INLINE-SDK.md` guide.
+- GitHub Actions CI workflow: `gofmt` check, `go vet`, `go test -race`, and `govulncheck` on every push and pull request.
+- `SECURITY.md` vulnerability disclosure policy (private reporting to `security@technosive.co.uk`, 90-day disclosure window).
 
 ### Fixed
 
 - `default_risk` is now honored for unknown tools: `YAMLRiskDB.Lookup` returns the configured default on a miss. Previously the inspect node hardcoded `low` for tools with no explicit entry, making `default_risk` — and therefore `StrictDefaults()` — ineffective.
+- Argument redaction is now effective: findings are attributed to their argument field via `gateway.ScanArgs`, so a redact decision masks the sensitive field instead of passing arguments through unchanged.
+
+### Security
+
+- Require Go 1.26.4, picking up standard-library fixes for [GO-2026-5039](https://pkg.go.dev/vuln/GO-2026-5039) (`net/textproto`) and [GO-2026-5037](https://pkg.go.dev/vuln/GO-2026-5037) (`crypto/x509`), both reached by the current call graph.
 
 ## [0.1.0] - 2026-06-12
 
@@ -71,5 +80,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Interrupt | 33μs | 303 |
 | DLP scan | 9.3μs | 0 |
 
-[Unreleased]: https://github.com/technosiveuk-ui/sentinelmcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/technosiveuk-ui/sentinelmcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/technosiveuk-ui/sentinelmcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/technosiveuk-ui/sentinelmcp/releases/tag/v0.1.0
