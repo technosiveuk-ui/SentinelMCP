@@ -19,6 +19,10 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o sentinelmcp ./cmd/sentinelmcp
 # For production distroless builds, use the distroless Dockerfile variant.
 # ---------------------------------------------------------------------------
 FROM alpine:3.21
+LABEL org.opencontainers.image.title="SentinelMCP" \
+      org.opencontainers.image.description="The Open-Source MCP Firewall & Security Gateway for AI Agents. Inspect, redact, and control tool calls. Proxy mode (universal) and Inline SDK mode (Go)." \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.vendor="Technosive Ltd."
 RUN apk add --no-cache wget ca-certificates
 COPY --from=builder /build/sentinelmcp /usr/local/bin/sentinelmcp
 COPY config/docker-config.yaml /etc/sentinelmcp/config.yaml
