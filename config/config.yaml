@@ -64,6 +64,30 @@ dlp_patterns: {}
   #   type: pii
 
 # ---------------------------------------------------------------------------
+# Action-based policies (compose with the risk model above)
+# ---------------------------------------------------------------------------
+# When present, rules are evaluated first-match-wins: a rule matches a tool when
+# its `tools` glob matches AND, if `risk` is set, the call's risk is at least
+# that level. The first matching rule's `action` drives enforcement; tools no
+# rule matches fall through to the risk model above (low->allow, medium->redact,
+# high->interrupt). A catch-all tools:["*"] rule must be LAST or it shadows
+# later rules. Hot-reloaded on config change; a bad file is rejected and the
+# previous policy is kept (fail-closed).
+#
+# policies:
+#   - name: "block-file-ops"
+#     tools: ["fs_*"]
+#     action: BLOCK
+#   - name: "approve-destructive"
+#     tools: ["db_drop*", "db_delete*"]
+#     action: INTERRUPT
+#     timeout: 300s          # overrides the global interrupt timeout
+#   - name: "redact-pii"
+#     tools: ["*"]           # catch-all — keep last
+#     action: REDACT
+#     inspection: [pii, secrets]  # DLP categories (used by the inspection layer)
+
+# ---------------------------------------------------------------------------
 # Sidecar proxy configuration (Phase 2)
 # ---------------------------------------------------------------------------
 

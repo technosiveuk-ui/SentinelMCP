@@ -79,8 +79,16 @@ func (s *sensitiveInvoker) Invoke(_ context.Context, _ string, _ map[string]any)
 	return "config: password=supersecret123 host=db.local", nil
 }
 
-// testPipeline creates a fully-wired pipeline for sidecar E2E tests.
+// testPipeline creates a fully-wired pipeline (risk-based DefaultPolicy) for
+// sidecar E2E tests.
 func testPipeline(invoker gateway.ToolInvoker) (gateway.Pipeline, *bytes.Buffer) {
+	return testPipelineWithPolicy(invoker, gateway.NewDefaultPolicy())
+}
+
+// testPipelineWithPolicy builds a fully-wired pipeline with a custom Policy,
+// used to exercise action-based PolicySet enforcement. Returns the pipeline and
+// the buffer capturing its JSON audit stream.
+func testPipelineWithPolicy(invoker gateway.ToolInvoker, policy gateway.Policy) (gateway.Pipeline, *bytes.Buffer) {
 	var auditBuf bytes.Buffer
 
 	riskDB := gateway.NewYAMLRiskDB(
@@ -98,7 +106,7 @@ func testPipeline(invoker gateway.ToolInvoker) (gateway.Pipeline, *bytes.Buffer)
 	}
 
 	cfg := &gateway.GatewayConfig{
-		Policy:           gateway.NewDefaultPolicy(),
+		Policy:           policy,
 		RiskDB:           riskDB,
 		DLPScanner:       scanner,
 		Redactor:         gateway.NewDefaultRedactor("***"),
@@ -144,6 +152,36 @@ func TestSidecar_LowRisk_Allow(t *testing.T) {
 	text := contentText(result)
 	if !strings.Contains(text, "echo_message") {
 		t.Errorf("expected result to contain 'echo_message', got: %s", text)
+	}
+}
+
+// TestSidecar_ActionPolicy_BlocksAndAudits: an action-based PolicySet overrides
+// the risk model — a normally low-risk tool is blocked by an explicit BLOCK rule,
+// and the firing policy name is surfaced in the audit stream.
+func TestSidecar_ActionPolicy_BlocksAndAudits(t *testing.T) {
+	policy := gateway.NewPolicySet([]gateway.PolicyRule{
+		{Name: "block-echo", Tools: []string{"echo_*"}, Action: gateway.DecisionBlock},
+	}, gateway.NewDefaultPolicy()) // fallback for non-echo tools
+
+	pipeline, auditBuf := testPipelineWithPolicy(&echoInvoker{}, policy)
+	proxy := NewProxy(pipeline, sidecar.Catalog{Tools: testUpstreamTools()}, nil)
+
+	req := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Name:      "echo_message",
+			Arguments: map[string]any{"msg": "hello"},
+		},
+	}
+	result, err := proxy.handleToolCall(context.Background(), "echo_message", req)
+	if err != nil {
+		t.Fatalf("handleToolCall: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("action-based block-echo policy should block the (low-risk) echo_message call")
+	}
+	audit := auditBuf.String()
+	if !strings.Contains(audit, "block-echo") {
+		t.Fatalf("audit should record the firing action policy name, got: %s", audit)
 	}
 }
 

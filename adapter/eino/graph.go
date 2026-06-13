@@ -430,12 +430,13 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 		switch decision.Decision {
 		case gateway.DecisionAllow:
 			_ = cfg.AuditEmitter.Emit(ctx, gateway.AuditEvent{
-				Timestamp: time.Now().UTC(),
-				Event:     "tool_start",
-				ToolName:  gc.ToolName,
-				RiskLevel: risk.Level,
-				Decision:  gateway.DecisionAllow,
-				Latency:   time.Since(start),
+				Timestamp:  time.Now().UTC(),
+				Event:      "tool_start",
+				ToolName:   gc.ToolName,
+				RiskLevel:  risk.Level,
+				Decision:   gateway.DecisionAllow,
+				PolicyName: decision.PolicyName,
+				Latency:    time.Since(start),
 			})
 			return gc, nil
 
@@ -443,13 +444,14 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 			// Apply arg redaction before passing to run_tool.
 			gc.Args = gateway.RedactArgs(gc.Args, decision, cfg.RedactionMask)
 			_ = cfg.AuditEmitter.Emit(ctx, gateway.AuditEvent{
-				Timestamp: time.Now().UTC(),
-				Event:     "tool_start",
-				ToolName:  gc.ToolName,
-				RiskLevel: risk.Level,
-				Decision:  gateway.DecisionRedact,
-				Args:      gc.Args,
-				Latency:   time.Since(start),
+				Timestamp:  time.Now().UTC(),
+				Event:      "tool_start",
+				ToolName:   gc.ToolName,
+				RiskLevel:  risk.Level,
+				Decision:   gateway.DecisionRedact,
+				PolicyName: decision.PolicyName,
+				Args:       gc.Args,
+				Latency:    time.Since(start),
 			})
 			return gc, nil
 
@@ -457,13 +459,14 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 			gc.Blocked = true
 			gc.Reason = decision.Reason
 			_ = cfg.AuditEmitter.Emit(ctx, gateway.AuditEvent{
-				Timestamp: time.Now().UTC(),
-				Event:     "tool_blocked",
-				ToolName:  gc.ToolName,
-				RiskLevel: risk.Level,
-				Decision:  gateway.DecisionBlock,
-				Latency:   time.Since(start),
-				Error:     decision.Reason,
+				Timestamp:  time.Now().UTC(),
+				Event:      "tool_blocked",
+				ToolName:   gc.ToolName,
+				RiskLevel:  risk.Level,
+				Decision:   gateway.DecisionBlock,
+				PolicyName: decision.PolicyName,
+				Latency:    time.Since(start),
+				Error:      decision.Reason,
 			})
 			return gc, nil
 
