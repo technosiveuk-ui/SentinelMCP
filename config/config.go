@@ -37,6 +37,7 @@ type Config struct {
 	Tools         map[string]ToolConfig `yaml:"tools"`
 	DLPPatterns   map[string]PatternDef `yaml:"dlp_patterns"`
 	Sidecar       SidecarConfig         `yaml:"sidecar"`
+	Auth          AuthConfig            `yaml:"auth"`
 	SIEM          SIEMConfig            `yaml:"siem"`
 	OTel          OTelConfig            `yaml:"otel"`
 	Approval      ApprovalConfig        `yaml:"approval"`
@@ -78,7 +79,25 @@ type SidecarConfig struct {
 	AdminToken      string           `yaml:"admin_token"`     // gates /api/v1/approval/resume; override via SENTINELMCP_ADMIN_TOKEN
 	Strict          bool             `yaml:"strict"`          // default true: reject http:// + IP-literal upstreams at load (fail-closed)
 	CheckpointPath  string           `yaml:"checkpoint_path"` // BoltDB path, e.g. "./sentinelmcp-checkpoints.db"
+	TLS             TLSConfig        `yaml:"tls"`             // opt-in inbound TLS; required when listen_addr is non-loopback
 	UpstreamServers []UpstreamConfig `yaml:"upstream_servers"`
+}
+
+// TLSConfig configures inbound TLS for the MCP proxy listener.
+type TLSConfig struct {
+	CertFile string `yaml:"cert_file"` // PEM cert file path
+	KeyFile  string `yaml:"key_file"`  // PEM key file path
+}
+
+// ---------------------------------------------------------------------------
+// Inbound authentication configuration
+// ---------------------------------------------------------------------------
+
+// AuthConfig configures inbound caller authentication for the MCP proxy.
+// OSS ships the static API-key authenticator; Enterprise plugs in mTLS/OAuth2
+// behind the same gateway/auth.Authenticator seam.
+type AuthConfig struct {
+	APIKeys map[string]string `yaml:"api_keys"` // key -> principal; enforced on every inbound call when non-empty
 }
 
 // UpstreamConfig describes a single upstream MCP server.
@@ -228,10 +247,11 @@ func (c *Config) guardSecretFilePerms(path string) error {
 		return fmt.Errorf("config: stat %s: %w", path, err)
 	}
 	if info.Mode().Perm()&0077 != 0 { // any group/other access bits set
-		if c.Sidecar.AdminToken != "" {
+		if c.Sidecar.AdminToken != "" || len(c.Auth.APIKeys) > 0 {
 			return fmt.Errorf(
-				"config: %s is group/world-readable (mode %o) but contains sidecar.admin_token: "+
-					"tighten the file to mode 0600 or supply the token via the SENTINELMCP_ADMIN_TOKEN env var",
+				"config: %s is group/world-readable (mode %o) but contains secrets "+
+					"(sidecar.admin_token and/or auth.api_keys): tighten the file to mode 0600, "+
+					"or supply secrets via the SENTINELMCP_ADMIN_TOKEN env var / a separate 0600 secrets file",
 				path, info.Mode().Perm(),
 			)
 		}

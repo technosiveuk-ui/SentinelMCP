@@ -9,6 +9,9 @@ global:
   redaction_mask: "***REDACTED***"
 
 sidecar:
+  # :8080 is non-loopback so the test-client container can reach the MCP proxy.
+  # A non-loopback MCP bind is fail-closed (requires TLS + auth) unless the
+  # sidecar is started with --insecure-dev-mode (passed in docker-compose.yml).
   listen_addr: ":8080"
   health_addr: ":9090"
   transport: "streamable_http"

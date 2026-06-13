@@ -19,19 +19,17 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
-
-	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/eino"
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/sidecar"
 	shieldconfig "github.com/technosiveuk-ui/sentinelmcp/config"
+	"github.com/technosiveuk-ui/sentinelmcp/gateway/auth"
 )
 
 func main() {
 	configPath := flag.String("config", "config/config.yaml", "path to SentinelMCP config YAML")
 	insecureAdminBind := flag.Bool("insecure-admin-bind", false, "allow the admin server to bind a non-loopback address (requires admin_token)")
+	insecureDevMode := flag.Bool("insecure-dev-mode", false, "disable non-loopback inbound TLS/auth requirements for local dev/demo (NOT for production)")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -52,6 +50,20 @@ func main() {
 	if !cfg.Sidecar.Strict {
 		log.Println("[warn] sidecar.strict is DISABLED: plaintext (http://) and IP-literal upstreams are permitted. " +
 			"Intended for local/private-network demos only — set sidecar.strict: true in production.")
+	}
+
+	// Build the inbound authenticator from configured API keys. nil means
+	// anonymous — permitted only on loopback or in dev mode; the bind policy
+	// below fail-closes any non-loopback anonymous exposure.
+	var authenticator auth.Authenticator
+	if len(cfg.Auth.APIKeys) > 0 {
+		authenticator = auth.NewAPIKeyAuthenticator(cfg.Auth.APIKeys)
+	}
+	if *insecureDevMode {
+		fmt.Fprintln(os.Stderr, "[warn] --insecure-dev-mode: inbound MCP non-loopback TLS/auth requirements are DISABLED. For local dev/demo ONLY.")
+	}
+	if err := validateInboundBind(cfg.Sidecar.ListenAddr, cfg.Sidecar.TLS.CertFile, cfg.Sidecar.TLS.KeyFile, authenticator, *insecureDevMode); err != nil {
+		log.Fatalf("MCP inbound: %v", err)
 	}
 
 	// ---------------------------------------------------------------
@@ -142,32 +154,8 @@ func main() {
 
 	switch transport {
 	case "streamable_http":
-		startStreamableHTTP(ctx, proxy, cfg.Sidecar.ListenAddr)
+		startStreamableHTTP(ctx, proxy, cfg.Sidecar.ListenAddr, cfg.Sidecar.TLS.CertFile, cfg.Sidecar.TLS.KeyFile, authenticator)
 	default:
 		log.Fatalf("Unsupported transport: %s (supported: streamable_http)", transport)
 	}
-}
-
-// startStreamableHTTP starts the MCP proxy server using StreamableHTTP transport.
-func startStreamableHTTP(ctx context.Context, proxy *Proxy, addr string) {
-	httpServer := mcpserver.NewStreamableHTTPServer(proxy.Server())
-
-	// Start server in goroutine.
-	go func() {
-		log.Printf("[mcp] StreamableHTTP proxy listening on %s", addr)
-		if err := httpServer.Start(addr); err != nil {
-			log.Fatalf("MCP server error: %v", err)
-		}
-	}()
-
-	// Wait for shutdown signal.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
-	fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down...\n", sig)
-
-	// Graceful shutdown.
-	shutdownCtx, cancel := context.WithTimeout(ctx, 5)
-	defer cancel()
-	_ = httpServer.Shutdown(shutdownCtx)
 }

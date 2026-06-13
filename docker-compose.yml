@@ -25,11 +25,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # The admin server binds :9090 on all interfaces so the test-client
-    # container (a separate network namespace) can reach the resume API. A
-    # non-loopback admin bind is fail-closed by default, so the demo passes
-    # --insecure-admin-bind AND a token (below) to opt in.
-    command: ["-config", "/etc/sentinelmcp/config.yaml", "--insecure-admin-bind"]
+    # Both the admin server (:9090) and the MCP proxy (:8080) bind all
+    # interfaces so the test-client container (a separate network namespace) can
+    # reach them. Non-loopback binds are fail-closed by default, so the demo
+    # passes --insecure-admin-bind (admin: needs admin_token below) and
+    # --insecure-dev-mode (MCP proxy: plaintext, no auth). Private compose
+    # network only — never do this in production.
+    command: ["-config", "/etc/sentinelmcp/config.yaml", "--insecure-admin-bind", "--insecure-dev-mode"]
     ports:
       - "8080:8080"
       - "9090:9090"

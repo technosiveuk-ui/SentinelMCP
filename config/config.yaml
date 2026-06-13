@@ -78,11 +78,28 @@ sidecar:
   # mode 0600 (the loader refuses group/world-readable configs carrying it).
   admin_token: ""
   checkpoint_path: "./sentinelmcp-checkpoints.db"
+  # Inbound TLS for the MCP proxy. Opt-in on loopback; REQUIRED when listen_addr
+  # is non-loopback (fail-closed). Generate a self-signed cert for testing with:
+  #   openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes
+  tls:
+    cert_file: ""
+    key_file: ""
   upstream_servers: []
     # - name: "echo"
     #   url: "http://localhost:3001/mcp"
     # - name: "filesystem"
     #   url: "http://localhost:3002/mcp"
+
+# ---------------------------------------------------------------------------
+# Inbound authentication (API keys)
+# ---------------------------------------------------------------------------
+# When non-empty, every inbound MCP call must present a valid key via
+# "Authorization: Bearer <key>" or "X-API-Key: <key>". Required when listen_addr
+# is non-loopback (fail-closed). If set in this file, it must be mode 0600.
+auth:
+  api_keys: {}
+    # "key-123": "alice"   # key -> principal
+    # "key-456": "bob"
 
 # ---------------------------------------------------------------------------
 # SIEM audit sinks (Phase 2)
