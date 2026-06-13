@@ -35,13 +35,31 @@ import (
 // ---------------------------------------------------------------------------
 
 // SidecarInvoker implements gateway.ToolInvoker by routing each tool call
-// to the correct upstream MCP server via mcp-go/client.
+// to the correct upstream MCP server via mcp-go/client. It also routes raw
+// resource/prompt reads (transparent proxying); those paths are pass-through —
+// the gateway pipeline owns tools/call only.
 type SidecarInvoker struct {
 	// toolClient maps tool name → MCP client that serves that tool.
 	toolClient map[string]*client.Client
 
 	// serverClients maps server name → MCP client (for health checks).
 	serverClients map[string]*client.Client
+
+	// resourceClient maps a static resource URI → the upstream serving it.
+	resourceClient map[string]*client.Client
+	// resourceTemplates binds each discovered resource template to its upstream
+	// client, so a concrete read URI can be routed to the owning upstream after
+	// mcp-go matches the URI to the template. First match wins.
+	resourceTemplates []resourceTemplateRoute
+	// promptClient maps a prompt name → the upstream serving it.
+	promptClient map[string]*client.Client
+}
+
+// resourceTemplateRoute binds a discovered resource template to the upstream
+// client that serves it.
+type resourceTemplateRoute struct {
+	uriTemplate *mcp.URITemplate
+	client      *client.Client
 }
 
 // Compile-time interface check.
@@ -70,6 +88,54 @@ func (inv *SidecarInvoker) Invoke(ctx context.Context, toolName string, args map
 	}
 
 	return extractContentText(result.Content), nil
+}
+
+// ReadResource forwards a resources/read for the given URI to the upstream that
+// owns it. Static resources route by exact URI; resource templates route by
+// matching the concrete URI against each discovered template. Raw pass-through —
+// no policy/DLP (the pipeline owns tools/call only; inspection of resource
+// contents is a later concern).
+func (inv *SidecarInvoker) ReadResource(ctx context.Context, uri string) ([]mcp.ResourceContents, error) {
+	if cli, ok := inv.resourceClient[uri]; ok {
+		return inv.readResourceWith(ctx, cli, uri)
+	}
+	for _, route := range inv.resourceTemplates {
+		if route.uriTemplate == nil {
+			continue
+		}
+		if route.uriTemplate.Regexp().MatchString(uri) {
+			return inv.readResourceWith(ctx, route.client, uri)
+		}
+	}
+	return nil, fmt.Errorf("sidecar: no upstream MCP server for resource %q", uri)
+}
+
+// readResourceWith calls resources/read on the given upstream client and returns
+// the raw contents. The concrete URI is forwarded unchanged.
+func (inv *SidecarInvoker) readResourceWith(ctx context.Context, cli *client.Client, uri string) ([]mcp.ResourceContents, error) {
+	result, err := cli.ReadResource(ctx, mcp.ReadResourceRequest{
+		Params: mcp.ReadResourceParams{URI: uri},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sidecar: read resource %q on upstream: %w", uri, err)
+	}
+	return result.Contents, nil
+}
+
+// GetPrompt forwards a prompts/get for the named prompt to the upstream that
+// owns it. Raw pass-through — no policy/DLP.
+func (inv *SidecarInvoker) GetPrompt(ctx context.Context, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+	cli, ok := inv.promptClient[name]
+	if !ok {
+		return nil, fmt.Errorf("sidecar: no upstream MCP server for prompt %q", name)
+	}
+	result, err := cli.GetPrompt(ctx, mcp.GetPromptRequest{
+		Params: mcp.GetPromptParams{Name: name, Arguments: args},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sidecar: get prompt %q on upstream: %w", name, err)
+	}
+	return result, nil
 }
 
 // extractContentText extracts text from MCP content blocks.

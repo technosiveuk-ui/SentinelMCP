@@ -31,18 +31,34 @@ import (
 // Proxy — MCP server wrapping the gateway pipeline
 // ---------------------------------------------------------------------------
 
+// upstreamForwarder forwards resource and prompt reads to upstream MCP servers.
+// Raw pass-through — no policy/DLP — the gateway pipeline owns tools/call only.
+// *sidecar.SidecarInvoker satisfies this; tests may substitute a stub.
+type upstreamForwarder interface {
+	ReadResource(ctx context.Context, uri string) ([]mcp.ResourceContents, error)
+	GetPrompt(ctx context.Context, name string, args map[string]string) (*mcp.GetPromptResult, error)
+}
+
 // Proxy is an MCP server that proxies tool calls through the SentinelMCP pipeline.
 // Each discovered upstream tool is registered on the proxy server. When a client
 // calls a tool, the proxy routes it through policy enforcement, DLP scanning,
 // and human-in-the-loop approval before forwarding to the upstream MCP server.
+// Discovered resources, resource templates, and prompts are registered as
+// transparent pass-through handlers (no pipeline) so the proxy faithfully
+// mirrors the upstream catalog beyond tools/call.
 type Proxy struct {
-	server   *mcpserver.MCPServer
-	pipeline gateway.Pipeline
-	tools    []sidecar.ToolMeta
+	server    *mcpserver.MCPServer
+	pipeline  gateway.Pipeline
+	catalog   sidecar.Catalog
+	forwarder upstreamForwarder
 }
 
 // NewProxy creates a proxy MCP server wrapping the gateway pipeline.
-func NewProxy(pipeline gateway.Pipeline, tools []sidecar.ToolMeta) *Proxy {
+// Tools are pipeline-wrapped; resources, resource templates, and prompts are
+// forwarded as raw pass-through. Registering a family auto-enables its MCP
+// capability, so a server that discovered none advertises none (the client sees
+// METHOD_NOT_FOUND, the correct response for an unsupported capability).
+func NewProxy(pipeline gateway.Pipeline, catalog sidecar.Catalog, forwarder upstreamForwarder) *Proxy {
 	srv := mcpserver.NewMCPServer(
 		"sentinelmcp-proxy",
 		"1.0.0",
@@ -50,14 +66,25 @@ func NewProxy(pipeline gateway.Pipeline, tools []sidecar.ToolMeta) *Proxy {
 	)
 
 	p := &Proxy{
-		server:   srv,
-		pipeline: pipeline,
-		tools:    tools,
+		server:    srv,
+		pipeline:  pipeline,
+		catalog:   catalog,
+		forwarder: forwarder,
 	}
 
-	// Register each discovered tool on the proxy server.
-	for _, t := range tools {
+	// Register each discovered item. Tool handlers run the pipeline; the rest
+	// forward straight through to the owning upstream.
+	for _, t := range catalog.Tools {
 		p.registerTool(t)
+	}
+	for _, r := range catalog.Resources {
+		p.registerResource(r)
+	}
+	for _, t := range catalog.ResourceTemplates {
+		p.registerResourceTemplate(t)
+	}
+	for _, pr := range catalog.Prompts {
+		p.registerPrompt(pr)
 	}
 
 	return p
@@ -73,6 +100,41 @@ func (p *Proxy) registerTool(meta sidecar.ToolMeta) {
 	}
 	p.server.AddTools(tool)
 	log.Printf("[proxy] registered tool: %s", meta.Name)
+}
+
+// registerResource registers a static upstream resource as a transparent
+// pass-through. The handler forwards resources/read to the upstream that owns
+// the URI. No pipeline, no DLP — raw forwarding.
+func (p *Proxy) registerResource(res mcp.Resource) {
+	p.server.AddResources(mcpserver.ServerResource{
+		Resource: res,
+		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			return p.forwarder.ReadResource(ctx, req.Params.URI)
+		},
+	})
+	log.Printf("[proxy] registered resource: %s", res.URI)
+}
+
+// registerResourceTemplate registers an upstream resource template as a
+// transparent pass-through. mcp-go matches a concrete read URI against the
+// template and invokes this handler, which forwards the concrete URI upstream.
+func (p *Proxy) registerResourceTemplate(tmpl mcp.ResourceTemplate) {
+	p.server.AddResourceTemplates(mcpserver.ServerResourceTemplate{
+		Template: tmpl,
+		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			return p.forwarder.ReadResource(ctx, req.Params.URI)
+		},
+	})
+	log.Printf("[proxy] registered resource template: %s", tmpl.Name)
+}
+
+// registerPrompt registers an upstream prompt as a transparent pass-through. The
+// handler forwards prompts/get (name + arguments) to the owning upstream.
+func (p *Proxy) registerPrompt(pr mcp.Prompt) {
+	p.server.AddPrompt(pr, func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return p.forwarder.GetPrompt(ctx, req.Params.Name, req.Params.Arguments)
+	})
+	log.Printf("[proxy] registered prompt: %s", pr.Name)
 }
 
 // handleToolCall routes a single tool call through the gateway pipeline.
@@ -133,8 +195,8 @@ func (p *Proxy) Server() *mcpserver.MCPServer {
 
 // ToolNames returns the names of all registered proxy tools.
 func (p *Proxy) ToolNames() []string {
-	names := make([]string, 0, len(p.tools))
-	for _, t := range p.tools {
+	names := make([]string, 0, len(p.catalog.Tools))
+	for _, t := range p.catalog.Tools {
 		names = append(names, t.Name)
 	}
 	return names

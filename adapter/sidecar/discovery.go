@@ -47,21 +47,40 @@ type ToolMeta struct {
 	InputSchema mcp.ToolInputSchema
 }
 
+// Catalog holds the full set of MCP items discovered from upstream servers.
+// The proxy registers every item: tools are pipeline-wrapped; resources,
+// resource templates, and prompts are transparently forwarded (raw pass-through).
+type Catalog struct {
+	Tools             []ToolMeta
+	Resources         []mcp.Resource
+	ResourceTemplates []mcp.ResourceTemplate
+	Prompts           []mcp.Prompt
+}
+
 // ---------------------------------------------------------------------------
-// DiscoverTools — connects to upstream MCP servers, discovers tools
+// Discover — connects to upstream MCP servers, discovers tools + resources + prompts
 // ---------------------------------------------------------------------------
 
-// DiscoverTools connects to all configured upstream MCP servers, discovers
-// their tools, and returns the tool metadata along with a populated SidecarInvoker.
+// Discover connects to all configured upstream MCP servers, discovers their
+// tools, resources, resource templates, and prompts, and returns the catalog
+// along with a populated SidecarInvoker that routes each item to its upstream.
 // provider resolves outbound credentials for upstreams that declare a
 // credentials_ref (may be nil when no upstream needs credentials).
-func DiscoverTools(ctx context.Context, servers []UpstreamConfig, provider secrets.Provider) ([]ToolMeta, *SidecarInvoker, error) {
+//
+// Per upstream, resources/resource-templates are gathered only when the server
+// advertises the resources capability, and prompts only when it advertises the
+// prompts capability. A failure within an optional family is logged and skipped
+// — the upstream may still serve tools. (cache-at-discovery: items added
+// upstream after startup are not seen until re-discovery.)
+func Discover(ctx context.Context, servers []UpstreamConfig, provider secrets.Provider) (*Catalog, *SidecarInvoker, error) {
 	invoker := &SidecarInvoker{
-		toolClient:    make(map[string]*client.Client),
-		serverClients: make(map[string]*client.Client),
+		toolClient:     make(map[string]*client.Client),
+		serverClients:  make(map[string]*client.Client),
+		resourceClient: make(map[string]*client.Client),
+		promptClient:   make(map[string]*client.Client),
 	}
 
-	var allTools []ToolMeta
+	catalog := &Catalog{}
 
 	for _, srv := range servers {
 		cli, err := connectUpstream(ctx, srv, provider)
@@ -73,18 +92,68 @@ func DiscoverTools(ctx context.Context, servers []UpstreamConfig, provider secre
 		if err != nil {
 			return nil, nil, fmt.Errorf("sidecar: discover tools from %q: %w", srv.Name, err)
 		}
-
 		for _, t := range tools {
 			invoker.toolClient[t.Name] = cli
-			allTools = append(allTools, t)
+			catalog.Tools = append(catalog.Tools, t)
+		}
+
+		caps := cli.GetServerCapabilities()
+		if caps.Resources != nil {
+			discoverResources(ctx, srv.Name, cli, invoker, catalog)
+		}
+		if caps.Prompts != nil {
+			discoverPrompts(ctx, srv.Name, cli, invoker, catalog)
 		}
 
 		invoker.serverClients[srv.Name] = cli
 		log.Printf("[sidecar] discovered %d tools from %q (%s)", len(tools), srv.Name, srv.URL)
 	}
 
-	log.Printf("[sidecar] total tools discovered: %d", len(allTools))
-	return allTools, invoker, nil
+	log.Printf("[sidecar] total discovered: %d tools, %d resources, %d resource templates, %d prompts",
+		len(catalog.Tools), len(catalog.Resources), len(catalog.ResourceTemplates), len(catalog.Prompts))
+	return catalog, invoker, nil
+}
+
+// discoverResources lists static resources and resource templates from an
+// upstream and binds them to the invoker (for read routing) and the catalog
+// (for proxy registration). Each family is independent and best-effort: a list
+// error is logged and skipped, never fatal.
+func discoverResources(ctx context.Context, serverName string, cli *client.Client, invoker *SidecarInvoker, catalog *Catalog) {
+	if res, err := cli.ListResources(ctx, mcp.ListResourcesRequest{}); err != nil {
+		log.Printf("[sidecar] skip resources from %q: list resources: %v", serverName, err)
+	} else {
+		for _, r := range res.Resources {
+			invoker.resourceClient[r.URI] = cli
+			catalog.Resources = append(catalog.Resources, r)
+		}
+	}
+
+	if tmpls, err := cli.ListResourceTemplates(ctx, mcp.ListResourceTemplatesRequest{}); err != nil {
+		log.Printf("[sidecar] skip resource templates from %q: list templates: %v", serverName, err)
+	} else {
+		for _, t := range tmpls.ResourceTemplates {
+			invoker.resourceTemplates = append(invoker.resourceTemplates, resourceTemplateRoute{
+				uriTemplate: t.URITemplate,
+				client:      cli,
+			})
+			catalog.ResourceTemplates = append(catalog.ResourceTemplates, t)
+		}
+	}
+}
+
+// discoverPrompts lists prompts from an upstream and binds them to the invoker
+// (for get routing) and the catalog (for proxy registration). Best-effort: a
+// list error is logged and skipped.
+func discoverPrompts(ctx context.Context, serverName string, cli *client.Client, invoker *SidecarInvoker, catalog *Catalog) {
+	prompts, err := cli.ListPrompts(ctx, mcp.ListPromptsRequest{})
+	if err != nil {
+		log.Printf("[sidecar] skip prompts from %q: list prompts: %v", serverName, err)
+		return
+	}
+	for _, p := range prompts.Prompts {
+		invoker.promptClient[p.Name] = cli
+		catalog.Prompts = append(catalog.Prompts, p)
+	}
 }
 
 // connectUpstream creates an MCP client for the given upstream server URL.

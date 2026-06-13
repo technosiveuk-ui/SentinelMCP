@@ -99,14 +99,15 @@ func main() {
 		log.Println("[warn] no upstream MCP servers configured — sidecar will have no tools to proxy")
 	}
 
-	tools, invoker, err := sidecar.DiscoverTools(ctx, upstreams, secretsProvider)
+	tools, invoker, err := sidecar.Discover(ctx, upstreams, secretsProvider)
 	if err != nil {
-		log.Fatalf("Failed to discover upstream tools: %v", err)
+		log.Fatalf("Failed to discover upstream MCP servers: %v", err)
 	}
 
-	log.Printf("Discovered %d tools from %d upstream servers", len(tools), len(upstreams))
-	for _, t := range tools {
-		log.Printf("  - %s", t.Name)
+	log.Printf("Discovered %d tools, %d resources, %d prompts from %d upstream servers",
+		len(tools.Tools), len(tools.Resources), len(tools.Prompts), len(upstreams))
+	for _, t := range tools.Tools {
+		log.Printf("  - tool: %s", t.Name)
 	}
 
 	// ---------------------------------------------------------------
@@ -134,7 +135,7 @@ func main() {
 	// ---------------------------------------------------------------
 	// Step 4: Create proxy MCP server.
 	// ---------------------------------------------------------------
-	proxy := NewProxy(pipeline, tools)
+	proxy := NewProxy(pipeline, *tools, invoker)
 	log.Printf("Proxy MCP server created with %d tools", len(proxy.ToolNames()))
 
 	// ---------------------------------------------------------------

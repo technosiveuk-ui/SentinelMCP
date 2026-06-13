@@ -122,7 +122,7 @@ func testPipeline(invoker gateway.ToolInvoker) (gateway.Pipeline, *bytes.Buffer)
 // TestSidecar_LowRisk_Allow tests the full MCP proxy path for a low-risk tool.
 func TestSidecar_LowRisk_Allow(t *testing.T) {
 	pipeline, _ := testPipeline(&echoInvoker{})
-	proxy := NewProxy(pipeline, testUpstreamTools())
+	proxy := NewProxy(pipeline, sidecar.Catalog{Tools: testUpstreamTools()}, nil)
 
 	// Simulate an MCP call through the proxy handler.
 	req := mcp.CallToolRequest{
@@ -151,7 +151,7 @@ func TestSidecar_LowRisk_Allow(t *testing.T) {
 // are DLP-scanned and redacted in the proxy path.
 func TestSidecar_MediumRisk_RedactsResponse(t *testing.T) {
 	pipeline, _ := testPipeline(&sensitiveInvoker{})
-	proxy := NewProxy(pipeline, testUpstreamTools())
+	proxy := NewProxy(pipeline, sidecar.Catalog{Tools: testUpstreamTools()}, nil)
 
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -179,7 +179,7 @@ func TestSidecar_MediumRisk_RedactsResponse(t *testing.T) {
 // through the proxy and admin server.
 func TestSidecar_HighRisk_InterruptAndResume(t *testing.T) {
 	pipeline, _ := testPipeline(&echoInvoker{})
-	proxy := NewProxy(pipeline, testUpstreamTools())
+	proxy := NewProxy(pipeline, sidecar.Catalog{Tools: testUpstreamTools()}, nil)
 
 	// Step 1: Call high-risk tool → should return interrupt message.
 	req := mcp.CallToolRequest{
@@ -244,7 +244,7 @@ func TestSidecar_HighRisk_InterruptAndResume(t *testing.T) {
 // TestSidecar_Blocked_HighRiskDeny tests that denying an interrupt blocks the tool call.
 func TestSidecar_Blocked_HighRiskDeny(t *testing.T) {
 	pipeline, _ := testPipeline(&echoInvoker{})
-	proxy := NewProxy(pipeline, testUpstreamTools())
+	proxy := NewProxy(pipeline, sidecar.Catalog{Tools: testUpstreamTools()}, nil)
 
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -356,7 +356,7 @@ func TestAdmin_Resume_RequiresToken(t *testing.T) {
 	admin := NewAdminServer("127.0.0.1:0", pipeline, WithAdminToken("secret"))
 
 	// Create a real interrupt to resume, so a valid token reaches a real decision.
-	proxy := NewProxy(pipeline, testUpstreamTools())
+	proxy := NewProxy(pipeline, sidecar.Catalog{Tools: testUpstreamTools()}, nil)
 	res, err := proxy.handleToolCall(context.Background(), "exec_command",
 		mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "exec_command", Arguments: map[string]any{"cmd": "rm -rf /tmp"}}})
 	if err != nil {
