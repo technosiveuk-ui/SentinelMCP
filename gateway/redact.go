@@ -150,6 +150,24 @@ func BuiltinPatterns() map[string]PatternDef {
 			Regex: `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`,
 			Type:  "pii",
 		},
+		"AWS_ACCESS_KEY": {
+			// IAM/STS access key IDs: AKIA (standard) or ASIA (temp) + 16 base32 chars.
+			Regex: `\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`,
+			Type:  "secret",
+		},
+		"GITHUB_TOKEN": {
+			// Fine-grained/classic PATs, OAuth, server-to-server, user, and refresh
+			// tokens: gh[pousr]_ + 36 alphanumeric chars.
+			Regex: `\bgh[pousr]_[A-Za-z0-9]{36}\b`,
+			Type:  "secret",
+		},
+		"PHONE": {
+			// Heuristic: a country code and/or NPA-NXX-XXXX with separators. Separator
+			// requirements keep false positives down versus bare digit runs, but phone
+			// detection is inherently noisy — treat matches as candidates, not certainties.
+			Regex: `(?:\+?\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}`,
+			Type:  "pii",
+		},
 	}
 }
 

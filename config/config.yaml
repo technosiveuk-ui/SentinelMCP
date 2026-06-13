@@ -56,8 +56,9 @@ tools:
     approval_reason: "Database operations require approval"
 
 dlp_patterns: {}
-  # Built-in patterns (PRIVATE_KEY, PASSWORD, API_KEY, CREDIT_CARD, SSN, EMAIL)
-  # are available by default. Add custom patterns here:
+  # Built-in patterns (PRIVATE_KEY, PASSWORD, API_KEY, CREDIT_CARD, SSN, EMAIL,
+  # AWS_ACCESS_KEY, GITHUB_TOKEN, PHONE) are available by default. Add custom
+  # patterns here:
   #
   # INTERNAL_HOSTNAME:
   #   regex: '\b[a-z]+\.internal\.company\.com\b'

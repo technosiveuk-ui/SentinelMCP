@@ -116,6 +116,53 @@ func TestRegexDLPScanner_InvalidRegex(t *testing.T) {
 	}
 }
 
+func TestRegexDLPScanner_AWSAccessKey(t *testing.T) {
+	scanner, _ := NewRegexDLPScanner(BuiltinPatterns())
+	findings, _ := scanner.Scan(context.Background(), "role arn with key AKIAIOSFODNN7EXAMPLE for prod")
+	if !findingNamed(findings, "AWS_ACCESS_KEY") {
+		t.Fatalf("expected AWS_ACCESS_KEY finding, got %+v", findings)
+	}
+}
+
+func TestRegexDLPScanner_GitHubToken(t *testing.T) {
+	scanner, _ := NewRegexDLPScanner(BuiltinPatterns())
+	token := "ghp_" + strings.Repeat("a", 36) // 36 chars after the prefix
+	findings, _ := scanner.Scan(context.Background(), "token="+token+" end")
+	if !findingNamed(findings, "GITHUB_TOKEN") {
+		t.Fatalf("expected GITHUB_TOKEN finding, got %+v", findings)
+	}
+}
+
+func TestRegexDLPScanner_Phone(t *testing.T) {
+	scanner, _ := NewRegexDLPScanner(BuiltinPatterns())
+	findings, _ := scanner.Scan(context.Background(), "call me at +1-555-123-4567 today")
+	if !findingNamed(findings, "PHONE") {
+		t.Fatalf("expected PHONE finding, got %+v", findings)
+	}
+}
+
+// TestRegexDLPScanner_PhoneNoFalsePositiveOnBareDigits: a 10+ digit run without
+// the required separators is not a phone match (the separator requirement is the
+// main false-positive guard).
+func TestRegexDLPScanner_PhoneNoFalsePositiveOnBareDigits(t *testing.T) {
+	scanner, _ := NewRegexDLPScanner(BuiltinPatterns())
+	findings, _ := scanner.Scan(context.Background(), "order id 1234567890123 shipped")
+	for _, f := range findings {
+		if f.Pattern == "PHONE" {
+			t.Fatalf("PHONE should not match a bare digit run, got finding %+v", f)
+		}
+	}
+}
+
+func findingNamed(findings []DLPFinding, name string) bool {
+	for _, f := range findings {
+		if f.Pattern == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDefaultRedactor_Redact_NoFindings(t *testing.T) {
 	r := NewDefaultRedactor("")
 	result := r.Redact("hello world", nil)
