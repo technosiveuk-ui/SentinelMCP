@@ -24,6 +24,7 @@ import (
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/sidecar"
 	shieldconfig "github.com/technosiveuk-ui/sentinelmcp/config"
 	"github.com/technosiveuk-ui/sentinelmcp/gateway/auth"
+	"github.com/technosiveuk-ui/sentinelmcp/gateway/secrets"
 )
 
 func main() {
@@ -69,14 +70,24 @@ func main() {
 	// ---------------------------------------------------------------
 	// Step 2: Discover upstream MCP tools.
 	// ---------------------------------------------------------------
+	// Build the outbound secrets provider (file map with env fallback). Even
+	// without a secrets file this is env-capable, so a credentials_ref can still
+	// resolve via SENTINELMCP_UPSTREAM_<KEY>_TOKEN.
+	secretsMap, err := secrets.LoadSecretsFile(cfg.Secrets.File)
+	if err != nil {
+		log.Fatalf("secrets: %v", err)
+	}
+	secretsProvider := secrets.NewFileEnvProvider(secretsMap)
+
 	upstreams := make([]sidecar.UpstreamConfig, 0, len(cfg.Sidecar.UpstreamServers))
 	for _, us := range cfg.Sidecar.UpstreamServers {
 		upstreams = append(upstreams, sidecar.UpstreamConfig{
-			Name:         us.Name,
-			URL:          us.URL,
-			CABundle:     us.CABundle,
-			ServerName:   us.ServerName,
-			PinnedSHA256: us.PinnedSHA256,
+			Name:           us.Name,
+			URL:            us.URL,
+			CABundle:       us.CABundle,
+			ServerName:     us.ServerName,
+			PinnedSHA256:   us.PinnedSHA256,
+			CredentialsRef: us.CredentialsRef,
 		})
 	}
 
@@ -84,7 +95,7 @@ func main() {
 		log.Println("[warn] no upstream MCP servers configured — sidecar will have no tools to proxy")
 	}
 
-	tools, invoker, err := sidecar.DiscoverTools(ctx, upstreams)
+	tools, invoker, err := sidecar.DiscoverTools(ctx, upstreams, secretsProvider)
 	if err != nil {
 		log.Fatalf("Failed to discover upstream tools: %v", err)
 	}

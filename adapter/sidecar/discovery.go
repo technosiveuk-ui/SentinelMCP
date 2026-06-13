@@ -22,6 +22,8 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/technosiveuk-ui/sentinelmcp/gateway/secrets"
 )
 
 // ---------------------------------------------------------------------------
@@ -35,6 +37,7 @@ type UpstreamConfig struct {
 	CABundle     string // PEM CA bundle: inline PEM or file path; empty = system roots
 	ServerName   string // TLS SNI / verification hostname override
 	PinnedSHA256 string // hex SHA-256 of leaf cert SPKI; additional pin on top of chain validation
+	CredentialsRef string // key into the secrets provider; empty = no credentials injected
 }
 
 // ToolMeta holds discovered tool metadata for registering on the proxy server.
@@ -50,7 +53,9 @@ type ToolMeta struct {
 
 // DiscoverTools connects to all configured upstream MCP servers, discovers
 // their tools, and returns the tool metadata along with a populated SidecarInvoker.
-func DiscoverTools(ctx context.Context, servers []UpstreamConfig) ([]ToolMeta, *SidecarInvoker, error) {
+// provider resolves outbound credentials for upstreams that declare a
+// credentials_ref (may be nil when no upstream needs credentials).
+func DiscoverTools(ctx context.Context, servers []UpstreamConfig, provider secrets.Provider) ([]ToolMeta, *SidecarInvoker, error) {
 	invoker := &SidecarInvoker{
 		toolClient:    make(map[string]*client.Client),
 		serverClients: make(map[string]*client.Client),
@@ -59,7 +64,7 @@ func DiscoverTools(ctx context.Context, servers []UpstreamConfig) ([]ToolMeta, *
 	var allTools []ToolMeta
 
 	for _, srv := range servers {
-		cli, err := connectUpstream(ctx, srv)
+		cli, err := connectUpstream(ctx, srv, provider)
 		if err != nil {
 			return nil, nil, fmt.Errorf("sidecar: connect to upstream %q (%s): %w", srv.Name, srv.URL, err)
 		}
@@ -83,7 +88,7 @@ func DiscoverTools(ctx context.Context, servers []UpstreamConfig) ([]ToolMeta, *
 }
 
 // connectUpstream creates an MCP client for the given upstream server URL.
-func connectUpstream(ctx context.Context, srv UpstreamConfig) (*client.Client, error) {
+func connectUpstream(ctx context.Context, srv UpstreamConfig, provider secrets.Provider) (*client.Client, error) {
 	var cli *client.Client
 
 	switch {
@@ -92,7 +97,19 @@ func connectUpstream(ctx context.Context, srv UpstreamConfig) (*client.Client, e
 		if err != nil {
 			return nil, fmt.Errorf("build HTTP client: %w", err)
 		}
-		cli, err = client.NewStreamableHttpClient(srv.URL, transport.WithHTTPBasicClient(httpClient))
+		opts := []transport.StreamableHTTPCOption{transport.WithHTTPBasicClient(httpClient)}
+
+		// Outbound credentials (Step 4). Fail-closed: a declared credentials_ref
+		// that cannot be resolved blocks the upstream entirely (NFR-07).
+		headers, err := resolveUpstreamHeaders(ctx, srv, provider)
+		if err != nil {
+			return nil, fmt.Errorf("upstream %q: %w", srv.Name, err)
+		}
+		if len(headers) > 0 {
+			opts = append(opts, transport.WithHTTPHeaders(headers))
+		}
+
+		cli, err = client.NewStreamableHttpClient(srv.URL, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("create HTTP client: %w", err)
 		}
@@ -114,6 +131,26 @@ func connectUpstream(ctx context.Context, srv UpstreamConfig) (*client.Client, e
 	}
 
 	return cli, nil
+}
+
+// resolveUpstreamHeaders returns the outbound credential headers for an
+// upstream, or an error if a declared credentials_ref cannot be resolved
+// (fail-closed). An empty credentials_ref means no credentials are needed.
+func resolveUpstreamHeaders(ctx context.Context, srv UpstreamConfig, provider secrets.Provider) (map[string]string, error) {
+	if srv.CredentialsRef == "" {
+		return nil, nil
+	}
+	if provider == nil {
+		return nil, fmt.Errorf("declares credentials_ref %q but no secrets provider is configured", srv.CredentialsRef)
+	}
+	cred, err := provider.Fetch(ctx, srv.CredentialsRef)
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, nil
+	}
+	return cred.Headers, nil
 }
 
 // listTools discovers all tools from an MCP server.

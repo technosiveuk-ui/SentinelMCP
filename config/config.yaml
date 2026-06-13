@@ -86,9 +86,10 @@ sidecar:
     key_file: ""
   upstream_servers: []
     # - name: "echo"
-    #   url: "http://localhost:3001/mcp"
+    #   url: "https://echo.local/mcp"
+    #   credentials_ref: "echo"   # resolved via secrets (file or SENTINELMCP_UPSTREAM_ECHO_TOKEN)
     # - name: "filesystem"
-    #   url: "http://localhost:3002/mcp"
+    #   url: "https://fs.local/mcp"
 
 # ---------------------------------------------------------------------------
 # Inbound authentication (API keys)
@@ -100,6 +101,21 @@ auth:
   api_keys: {}
     # "key-123": "alice"   # key -> principal
     # "key-456": "bob"
+
+# ---------------------------------------------------------------------------
+# Outbound credentials (upstream authentication)
+# ---------------------------------------------------------------------------
+# Upstreams that require auth declare credentials_ref; SentinelMCP resolves it
+# from a mode-0600 secrets file (below) or the env var
+# SENTINELMCP_UPSTREAM_<KEY>_TOKEN. Fail-closed: an unresolved credentials_ref
+# blocks the upstream entirely. A secrets.yaml looks like:
+#   upstreams:
+#     echo:
+#       headers:
+#         Authorization: "Bearer <token>"
+secrets:
+  provider: "file"            # OSS file/env provider; Enterprise overrides in SentinelENT
+  file: ""                    # e.g. "./secrets.yaml" (must be mode 0600); empty = env-only
 
 # ---------------------------------------------------------------------------
 # SIEM audit sinks (Phase 2)

@@ -38,6 +38,7 @@ type Config struct {
 	DLPPatterns   map[string]PatternDef `yaml:"dlp_patterns"`
 	Sidecar       SidecarConfig         `yaml:"sidecar"`
 	Auth          AuthConfig            `yaml:"auth"`
+	Secrets       SecretsConfig         `yaml:"secrets"`
 	SIEM          SIEMConfig            `yaml:"siem"`
 	OTel          OTelConfig            `yaml:"otel"`
 	Approval      ApprovalConfig        `yaml:"approval"`
@@ -100,6 +101,14 @@ type AuthConfig struct {
 	APIKeys map[string]string `yaml:"api_keys"` // key -> principal; enforced on every inbound call when non-empty
 }
 
+// SecretsConfig configures outbound credential resolution for upstream MCP
+// servers. OSS ships the file/env provider; Enterprise plugs in Vault / ASM /
+// GCP SM behind the same gateway/secrets.Provider seam.
+type SecretsConfig struct {
+	Provider string `yaml:"provider"` // "file" (OSS); Enterprise overrides in SentinelENT
+	File     string `yaml:"file"`     // path to secrets.yaml (mode 0600 enforced); empty = env-only
+}
+
 // UpstreamConfig describes a single upstream MCP server.
 type UpstreamConfig struct {
 	Name         string `yaml:"name"`
@@ -107,6 +116,7 @@ type UpstreamConfig struct {
 	CABundle     string `yaml:"ca_bundle"`    // PEM CA bundle: inline PEM or a file path; empty = system roots
 	ServerName   string `yaml:"server_name"`  // TLS SNI / verification hostname override
 	PinnedSHA256 string `yaml:"pinned_sha256"` // hex SHA-256 of the leaf cert SPKI; additional pin on top of chain validation
+	CredentialsRef string `yaml:"credentials_ref"` // key into the secrets provider; empty = no credentials injected
 }
 
 // ---------------------------------------------------------------------------
