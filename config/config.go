@@ -90,14 +90,14 @@ type PolicyDef struct {
 
 // SidecarConfig configures the sidecar proxy binary.
 type SidecarConfig struct {
-	ListenAddr      string           `yaml:"listen_addr"`     // e.g. "localhost:8080"
-	Transport       string           `yaml:"transport"`       // "stdio" | "streamable_http"
-	HealthAddr      string           `yaml:"health_addr"`     // e.g. "localhost:9090"
+	ListenAddr      string           `yaml:"listen_addr"`      // e.g. "localhost:8080"
+	Transport       string           `yaml:"transport"`        // "stdio" | "streamable_http"
+	HealthAddr      string           `yaml:"health_addr"`      // e.g. "localhost:9090"
 	AdminToken      string           `yaml:"admin_token"`      // gates /api/v1/approval/resume; override via SENTINELMCP_ADMIN_TOKEN
 	Strict          bool             `yaml:"strict"`           // default true: reject http:// + IP-literal upstreams at load (fail-closed)
 	EgressAllowlist []string         `yaml:"egress_allowlist"` // host suffixes; when set, upstream hosts must match (IPs must match exactly)
 	CheckpointPath  string           `yaml:"checkpoint_path"`  // BoltDB path, e.g. "./sentinelmcp-checkpoints.db"
-	TLS             TLSConfig        `yaml:"tls"`             // opt-in inbound TLS; required when listen_addr is non-loopback
+	TLS             TLSConfig        `yaml:"tls"`              // opt-in inbound TLS; required when listen_addr is non-loopback
 	UpstreamServers []UpstreamConfig `yaml:"upstream_servers"`
 }
 
@@ -128,11 +128,11 @@ type SecretsConfig struct {
 
 // UpstreamConfig describes a single upstream MCP server.
 type UpstreamConfig struct {
-	Name         string `yaml:"name"`
-	URL          string `yaml:"url"`          // e.g. "https://fs.local/mcp"
-	CABundle     string `yaml:"ca_bundle"`    // PEM CA bundle: inline PEM or a file path; empty = system roots
-	ServerName   string `yaml:"server_name"`  // TLS SNI / verification hostname override
-	PinnedSHA256 string `yaml:"pinned_sha256"` // hex SHA-256 of the leaf cert SPKI; additional pin on top of chain validation
+	Name           string `yaml:"name"`
+	URL            string `yaml:"url"`             // e.g. "https://fs.local/mcp"
+	CABundle       string `yaml:"ca_bundle"`       // PEM CA bundle: inline PEM or a file path; empty = system roots
+	ServerName     string `yaml:"server_name"`     // TLS SNI / verification hostname override
+	PinnedSHA256   string `yaml:"pinned_sha256"`   // hex SHA-256 of the leaf cert SPKI; additional pin on top of chain validation
 	CredentialsRef string `yaml:"credentials_ref"` // key into the secrets provider; empty = no credentials injected
 }
 

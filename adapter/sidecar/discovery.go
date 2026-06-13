@@ -32,11 +32,11 @@ import (
 
 // UpstreamConfig describes a single upstream MCP server to connect to.
 type UpstreamConfig struct {
-	Name         string // display name
-	URL          string // e.g. "https://fs.local/mcp"
-	CABundle     string // PEM CA bundle: inline PEM or file path; empty = system roots
-	ServerName   string // TLS SNI / verification hostname override
-	PinnedSHA256 string // hex SHA-256 of leaf cert SPKI; additional pin on top of chain validation
+	Name           string // display name
+	URL            string // e.g. "https://fs.local/mcp"
+	CABundle       string // PEM CA bundle: inline PEM or file path; empty = system roots
+	ServerName     string // TLS SNI / verification hostname override
+	PinnedSHA256   string // hex SHA-256 of leaf cert SPKI; additional pin on top of chain validation
 	CredentialsRef string // key into the secrets provider; empty = no credentials injected
 }
 

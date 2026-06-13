@@ -84,7 +84,7 @@ func TestBuildUpstreamHTTPClient_WrongPin_Rejects(t *testing.T) {
 		URL:          ts.URL,
 		CABundle:     string(encodePEMCert(leaf.Raw)), // CA trusted so chain validates
 		ServerName:   u.Hostname(),
-		PinnedSHA256: strings.Repeat("00", 32),        // valid 32-byte pin that won't match
+		PinnedSHA256: strings.Repeat("00", 32), // valid 32-byte pin that won't match
 	})
 	if err != nil {
 		t.Fatalf("build client: %v", err)

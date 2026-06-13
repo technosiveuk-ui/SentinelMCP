@@ -118,7 +118,10 @@ func TestPolicySet_InspectionAndTimeoutCarried(t *testing.T) {
 }
 
 func TestRiskAtLeast(t *testing.T) {
-	cases := []struct{ level, threshold RiskLevel; want bool }{
+	cases := []struct {
+		level, threshold RiskLevel
+		want             bool
+	}{
 		{RiskHigh, RiskMedium, true},
 		{RiskMedium, RiskHigh, false},
 		{RiskMedium, RiskMedium, true},
