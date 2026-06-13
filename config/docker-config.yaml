@@ -12,6 +12,12 @@ sidecar:
   listen_addr: ":8080"
   health_addr: ":9090"
   transport: "streamable_http"
+  # The admin server binds a non-loopback address (:9090) so the test-client
+  # container can reach the resume API. A non-loopback bind is fail-closed
+  # unless the sidecar is started with --insecure-admin-bind AND an admin token.
+  # Leave admin_token empty here and inject it via the SENTINELMCP_ADMIN_TOKEN
+  # env var (set in docker-compose.yml) so the secret never lives in the image.
+  admin_token: ""
   upstream_servers:
     - name: "demo-upstream"
       url: "http://upstream:3001/mcp"

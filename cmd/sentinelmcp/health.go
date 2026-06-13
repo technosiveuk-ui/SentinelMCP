@@ -15,10 +15,13 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/technosiveuk-ui/sentinelmcp/gateway"
@@ -29,14 +32,32 @@ import (
 // ---------------------------------------------------------------------------
 
 // AdminServer provides health endpoints and the approval resume API.
+//
+// Security model (transport-security hardening):
+//   - /healthz and /readyz are unauthenticated (read-only probes).
+//   - /api/v1/approval/resume is privileged (it releases a blocked high-risk
+//     call) and always requires the admin token, including on loopback. With no
+//     token configured the endpoint is disabled (401).
+//   - Non-loopback binds require explicit opt-in (--insecure-admin-bind) and a
+//     configured token; see ValidateBind.
 type AdminServer struct {
-	server   *http.Server
-	pipeline gateway.Pipeline
-	ready    bool
+	server     *http.Server
+	pipeline   gateway.Pipeline
+	ready      bool
+	adminToken string // gates /api/v1/approval/resume; empty = resume disabled (401)
+}
+
+// AdminServerOption configures an AdminServer.
+type AdminServerOption func(*AdminServer)
+
+// WithAdminToken sets the token required to call /api/v1/approval/resume.
+// If unset, the resume endpoint is disabled (always returns 401).
+func WithAdminToken(token string) AdminServerOption {
+	return func(a *AdminServer) { a.adminToken = token }
 }
 
 // NewAdminServer creates the admin HTTP server for health checks and resume API.
-func NewAdminServer(addr string, pipeline gateway.Pipeline) *AdminServer {
+func NewAdminServer(addr string, pipeline gateway.Pipeline, opts ...AdminServerOption) *AdminServer {
 	mux := http.NewServeMux()
 	a := &AdminServer{
 		server: &http.Server{
@@ -46,12 +67,56 @@ func NewAdminServer(addr string, pipeline gateway.Pipeline) *AdminServer {
 		},
 		pipeline: pipeline,
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
 
 	mux.HandleFunc("/healthz", a.handleHealthz)
 	mux.HandleFunc("/readyz", a.handleReadyz)
 	mux.HandleFunc("/api/v1/approval/resume", a.handleResume)
 
 	return a
+}
+
+// ValidateBind enforces the admin bind policy (fail-closed, NFR-07 family).
+// Loopback binds are always allowed (the host boundary carries trust). A
+// non-loopback bind requires explicit opt-in via allowNonLoopback
+// (--insecure-admin-bind) AND a configured admin token, because the resume
+// endpoint becomes reachable over the network.
+func (a *AdminServer) ValidateBind(allowNonLoopback bool) error {
+	if isLoopbackBind(a.server.Addr) {
+		return nil
+	}
+	if !allowNonLoopback {
+		return fmt.Errorf("admin health_addr %q is non-loopback: refusing to start "+
+			"(pass --insecure-admin-bind to expose the admin server on a network interface)",
+			a.server.Addr)
+	}
+	if a.adminToken == "" {
+		return fmt.Errorf("admin health_addr %q is non-loopback but no admin_token is configured: "+
+			"set sidecar.admin_token (or the SENTINELMCP_ADMIN_TOKEN env var) before exposing the admin server",
+			a.server.Addr)
+	}
+	return nil
+}
+
+// isLoopbackBind reports whether addr binds to a loopback interface only.
+// Wildcard hosts ("", ":port") and non-loopback hosts are treated as exposed.
+func isLoopbackBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false // malformed/ambiguous: conservatively treat as exposed
+	}
+	if host == "" {
+		return false // wildcard, binds all interfaces
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false // resolvable hostname other than localhost: conservatively exposed
 }
 
 // SetReady marks the sidecar as ready (all upstreams discovered, pipeline compiled).
@@ -109,6 +174,16 @@ func (a *AdminServer) handleResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The resume endpoint releases a blocked high-risk call — it is privileged.
+	// Require the admin token on every bind (including loopback); with no token
+	// configured the endpoint is disabled (401). Constant-time compare to avoid
+	// leaking the token via timing.
+	provided := extractAdminToken(r)
+	if a.adminToken == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(a.adminToken)) != 1 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	if a.pipeline == nil {
 		http.Error(w, "pipeline not initialized", http.StatusServiceUnavailable)
 		return
@@ -162,4 +237,21 @@ func parseApprovalAction(s string) (gateway.ApprovalAction, error) {
 	default:
 		return "", fmt.Errorf("invalid action %q: must be approve, deny, or modify", s)
 	}
+}
+
+// extractAdminToken reads the admin token from the X-Admin-Token header, or
+// from the Authorization header (as "Bearer <token>").
+func extractAdminToken(r *http.Request) string {
+	if h := strings.TrimSpace(r.Header.Get("X-Admin-Token")); h != "" {
+		return h
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if auth == "" {
+		return ""
+	}
+	const prefix = "Bearer "
+	if strings.HasPrefix(auth, prefix) {
+		return strings.TrimSpace(auth[len(prefix):])
+	}
+	return auth
 }

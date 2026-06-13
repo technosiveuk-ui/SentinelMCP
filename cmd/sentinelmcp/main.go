@@ -31,6 +31,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config/config.yaml", "path to SentinelMCP config YAML")
+	insecureAdminBind := flag.Bool("insecure-admin-bind", false, "allow the admin server to bind a non-loopback address (requires admin_token)")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -101,7 +102,19 @@ func main() {
 	// ---------------------------------------------------------------
 	// Step 5: Start admin HTTP server (health + resume API).
 	// ---------------------------------------------------------------
-	admin := NewAdminServer(cfg.Sidecar.HealthAddr, pipeline)
+	// Resolve the admin token: the SENTINELMCP_ADMIN_TOKEN env var takes
+	// precedence over the config file, so a world-readable config need not carry
+	// the secret. The config loader already fail-closes if the token is present
+	// in a group/world-readable config file.
+	adminToken := cfg.Sidecar.AdminToken
+	if v := os.Getenv("SENTINELMCP_ADMIN_TOKEN"); v != "" {
+		adminToken = v
+	}
+
+	admin := NewAdminServer(cfg.Sidecar.HealthAddr, pipeline, WithAdminToken(adminToken))
+	if err := admin.ValidateBind(*insecureAdminBind); err != nil {
+		log.Fatalf("Admin server: %v", err)
+	}
 	if err := admin.Start(); err != nil {
 		log.Fatalf("Failed to start admin server: %v", err)
 	}

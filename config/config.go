@@ -73,6 +73,7 @@ type SidecarConfig struct {
 	ListenAddr      string           `yaml:"listen_addr"`     // e.g. "localhost:8080"
 	Transport       string           `yaml:"transport"`       // "stdio" | "streamable_http"
 	HealthAddr      string           `yaml:"health_addr"`     // e.g. "localhost:9090"
+	AdminToken      string           `yaml:"admin_token"`     // gates /api/v1/approval/resume; override via SENTINELMCP_ADMIN_TOKEN
 	CheckpointPath  string           `yaml:"checkpoint_path"` // BoltDB path, e.g. "./sentinelmcp-checkpoints.db"
 	UpstreamServers []UpstreamConfig `yaml:"upstream_servers"`
 }
@@ -190,6 +191,12 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse YAML: %w", err)
 	}
 
+	// Fail-closed (NFR-06 family): a config file holding a secret must not be
+	// readable by group or other users.
+	if err := cfg.guardSecretFilePerms(path); err != nil {
+		return nil, err
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -203,6 +210,26 @@ func LoadOrDefault(path string) (*Config, error) {
 		return DefaultConfig(), nil
 	}
 	return Load(path)
+}
+
+// guardSecretFilePerms enforces the secrets-at-rest discipline (NFR-06 family).
+// A config file that contains a secret (sidecar.admin_token now; auth.api_keys
+// lands in a later step) must not be readable by group or other users. Fail-closed.
+func (c *Config) guardSecretFilePerms(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("config: stat %s: %w", path, err)
+	}
+	if info.Mode().Perm()&0077 != 0 { // any group/other access bits set
+		if c.Sidecar.AdminToken != "" {
+			return fmt.Errorf(
+				"config: %s is group/world-readable (mode %o) but contains sidecar.admin_token: "+
+					"tighten the file to mode 0600 or supply the token via the SENTINELMCP_ADMIN_TOKEN env var",
+				path, info.Mode().Perm(),
+			)
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

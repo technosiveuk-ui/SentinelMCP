@@ -25,6 +25,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # The admin server binds :9090 on all interfaces so the test-client
+    # container (a separate network namespace) can reach the resume API. A
+    # non-loopback admin bind is fail-closed by default, so the demo passes
+    # --insecure-admin-bind AND a token (below) to opt in.
+    command: ["-config", "/etc/sentinelmcp/config.yaml", "--insecure-admin-bind"]
     ports:
       - "8080:8080"
       - "9090:9090"
@@ -33,6 +38,10 @@ services:
         condition: service_healthy
     environment:
       - SENTINELMCP_CONFIG=/etc/sentinelmcp/config.yaml
+      # Shared demo token. Injected via env (not baked into the image/config) so
+      # the secret never lives in the layered filesystem. The test-client below
+      # receives the same value so it can authenticate resume calls.
+      - SENTINELMCP_ADMIN_TOKEN=demo-admin-token-change-me
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/healthz"]
       interval: 2s
@@ -50,3 +59,4 @@ services:
     environment:
       - SENTINELMCP_URL=http://sidecar:8080/mcp
       - SENTINELMCP_ADMIN_URL=http://sidecar:9090
+      - SENTINELMCP_ADMIN_TOKEN=demo-admin-token-change-me

@@ -211,7 +211,7 @@ func TestSidecar_HighRisk_InterruptAndResume(t *testing.T) {
 	}
 
 	// Step 2: Resume via admin server.
-	admin := NewAdminServer("127.0.0.1:0", pipeline)
+	admin := NewAdminServer("127.0.0.1:0", pipeline, WithAdminToken("test-token"))
 	admin.SetReady(true)
 
 	resumeBody := fmt.Sprintf(`{"interrupt_id":"%s","checkpoint_id":"%s","action":"approve","reason":"test approval"}`,
@@ -219,6 +219,7 @@ func TestSidecar_HighRisk_InterruptAndResume(t *testing.T) {
 
 	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approval/resume", strings.NewReader(resumeBody))
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer test-token")
 	w := httptest.NewRecorder()
 
 	admin.handleResume(w, httpReq)
@@ -264,13 +265,14 @@ func TestSidecar_Blocked_HighRiskDeny(t *testing.T) {
 	}
 
 	// Resume with deny.
-	admin := NewAdminServer("127.0.0.1:0", pipeline)
+	admin := NewAdminServer("127.0.0.1:0", pipeline, WithAdminToken("test-token"))
 	admin.SetReady(true)
 
 	resumeBody := fmt.Sprintf(`{"interrupt_id":"%s","checkpoint_id":"%s","action":"deny","reason":"too dangerous"}`,
 		interruptID, checkpointID)
 
 	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/approval/resume", strings.NewReader(resumeBody))
+	httpReq.Header.Set("Authorization", "Bearer test-token")
 	w := httptest.NewRecorder()
 	admin.handleResume(w, httpReq)
 
@@ -312,7 +314,7 @@ func TestSidecar_HealthEndpoints(t *testing.T) {
 func TestSidecar_ResumeAPI_Validation(t *testing.T) {
 	// Need a real pipeline so handleResume gets past the nil check.
 	pipeline, _ := testPipeline(&echoInvoker{})
-	admin := NewAdminServer("127.0.0.1:0", pipeline)
+	admin := NewAdminServer("127.0.0.1:0", pipeline, WithAdminToken("test-token"))
 	admin.SetReady(true)
 
 	tests := []struct {
@@ -333,11 +335,106 @@ func TestSidecar_ResumeAPI_Validation(t *testing.T) {
 				body = strings.NewReader(tt.body)
 			}
 			req := httptest.NewRequest(tt.method, "/api/v1/approval/resume", body)
+			req.Header.Set("Authorization", "Bearer test-token")
 			w := httptest.NewRecorder()
 			admin.handleResume(w, req)
 
 			if w.Result().StatusCode != tt.wantStatus {
 				t.Errorf("expected status %d, got %d", tt.wantStatus, w.Result().StatusCode)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Admin server security (transport-security hardening, Step 1)
+// ---------------------------------------------------------------------------
+
+// TestAdmin_Resume_RequiresToken verifies the resume endpoint is gated by the admin token.
+func TestAdmin_Resume_RequiresToken(t *testing.T) {
+	pipeline, _ := testPipeline(&echoInvoker{})
+	admin := NewAdminServer("127.0.0.1:0", pipeline, WithAdminToken("secret"))
+
+	// Create a real interrupt to resume, so a valid token reaches a real decision.
+	proxy := NewProxy(pipeline, testUpstreamTools())
+	res, err := proxy.handleToolCall(context.Background(), "exec_command",
+		mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "exec_command", Arguments: map[string]any{"cmd": "rm -rf /tmp"}}})
+	if err != nil {
+		t.Fatalf("handleToolCall: %v", err)
+	}
+	interruptID, checkpointID := extractInterruptIDs(contentText(res))
+
+	cases := []struct {
+		name       string
+		authHeader string
+		want       int
+	}{
+		{"no token", "", http.StatusUnauthorized},
+		{"wrong token", "Bearer nope", http.StatusUnauthorized},
+		{"correct token", "Bearer secret", http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Use "approve" so a valid token reaches the authorized success path
+			// (200). The deny path (non-200) is covered by TestSidecar_Blocked_HighRiskDeny.
+			body := fmt.Sprintf(`{"interrupt_id":"%s","checkpoint_id":"%s","action":"approve","reason":"x"}`,
+				interruptID, checkpointID)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/approval/resume", strings.NewReader(body))
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			w := httptest.NewRecorder()
+			admin.handleResume(w, req)
+			if w.Result().StatusCode != tc.want {
+				t.Errorf("got %d, want %d", w.Result().StatusCode, tc.want)
+			}
+		})
+	}
+}
+
+// TestAdmin_Resume_DisabledWithoutToken verifies resume is disabled (401) when no token is configured.
+func TestAdmin_Resume_DisabledWithoutToken(t *testing.T) {
+	pipeline, _ := testPipeline(&echoInvoker{})
+	admin := NewAdminServer("127.0.0.1:0", pipeline) // no token configured
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/approval/resume", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer anything")
+	w := httptest.NewRecorder()
+	admin.handleResume(w, req)
+
+	if w.Result().StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 (resume disabled without configured token), got %d", w.Result().StatusCode)
+	}
+}
+
+// TestAdmin_ValidateBind verifies the admin bind policy.
+func TestAdmin_ValidateBind(t *testing.T) {
+	pipeline, _ := testPipeline(&echoInvoker{})
+
+	cases := []struct {
+		addr         string
+		token        string
+		allowNonLoop bool
+		wantErr      bool
+	}{
+		{"127.0.0.1:9090", "", false, false}, // IPv4 loopback: token optional
+		{"localhost:9090", "", false, false}, // localhost: token optional
+		{"[::1]:9090", "", false, false},     // IPv6 loopback: token optional
+		{"0.0.0.0:9090", "", false, true},    // non-loopback, no flag: refuse
+		{"0.0.0.0:9090", "", true, true},     // non-loopback, flag, no token: refuse
+		{"0.0.0.0:9090", "tok", true, false}, // non-loopback, flag, token: ok
+		{":9090", "", false, true},           // wildcard: non-loopback, no flag: refuse
+		{":9090", "tok", true, false},        // wildcard, flag, token: ok
+	}
+	for _, tc := range cases {
+		t.Run(tc.addr, func(t *testing.T) {
+			admin := NewAdminServer(tc.addr, pipeline, WithAdminToken(tc.token))
+			err := admin.ValidateBind(tc.allowNonLoop)
+			if tc.wantErr && err == nil {
+				t.Errorf("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("expected no error, got: %v", err)
 			}
 		})
 	}

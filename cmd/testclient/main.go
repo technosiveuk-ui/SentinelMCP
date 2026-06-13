@@ -200,7 +200,20 @@ func approveResume(adminURL, interruptID, checkpointID string) bool {
 	body := fmt.Sprintf(`{"interrupt_id":"%s","checkpoint_id":"%s","action":"approve","reason":"test auto-approve"}`,
 		interruptID, checkpointID)
 
-	resp, err := http.Post(adminURL+"/api/v1/approval/resume", "application/json", bytes.NewBufferString(body))
+	// The resume endpoint is privileged and requires the admin token. Read it
+	// from the same env var the sidecar uses (SENTINELMCP_ADMIN_TOKEN) and send
+	// it as a Bearer token. Without it the sidecar returns 401 (fail-closed).
+	req, err := http.NewRequest(http.MethodPost, adminURL+"/api/v1/approval/resume", bytes.NewBufferString(body))
+	if err != nil {
+		log.Printf("Resume API request error: %v", err)
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tok := os.Getenv("SENTINELMCP_ADMIN_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("Resume API error: %v", err)
 		return false

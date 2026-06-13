@@ -71,6 +71,11 @@ sidecar:
   listen_addr: "localhost:8080"
   transport: "streamable_http"       # "stdio" | "streamable_http"
   health_addr: "localhost:9090"
+  # Gates the privileged /api/v1/approval/resume endpoint. Required when
+  # health_addr is non-loopback (fail-closed). Prefer the SENTINELMCP_ADMIN_TOKEN
+  # env var over placing the secret here; if set in this file, the file must be
+  # mode 0600 (the loader refuses group/world-readable configs carrying it).
+  admin_token: ""
   checkpoint_path: "./sentinelmcp-checkpoints.db"
   upstream_servers: []
     # - name: "echo"
