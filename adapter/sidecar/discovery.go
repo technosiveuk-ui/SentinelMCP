@@ -16,7 +16,7 @@ package sidecar
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/client"
@@ -106,11 +106,12 @@ func Discover(ctx context.Context, servers []UpstreamConfig, provider secrets.Pr
 		}
 
 		invoker.serverClients[srv.Name] = cli
-		log.Printf("[sidecar] discovered %d tools from %q (%s)", len(tools), srv.Name, srv.URL)
+		slog.Info("discovered upstream tools", "component", "sidecar", "server", srv.Name, "url", srv.URL, "tools", len(tools))
 	}
 
-	log.Printf("[sidecar] total discovered: %d tools, %d resources, %d resource templates, %d prompts",
-		len(catalog.Tools), len(catalog.Resources), len(catalog.ResourceTemplates), len(catalog.Prompts))
+	slog.Info("upstream discovery complete", "component", "sidecar",
+		"tools", len(catalog.Tools), "resources", len(catalog.Resources),
+		"resource_templates", len(catalog.ResourceTemplates), "prompts", len(catalog.Prompts))
 	return catalog, invoker, nil
 }
 
@@ -120,7 +121,7 @@ func Discover(ctx context.Context, servers []UpstreamConfig, provider secrets.Pr
 // error is logged and skipped, never fatal.
 func discoverResources(ctx context.Context, serverName string, cli *client.Client, invoker *SidecarInvoker, catalog *Catalog) {
 	if res, err := cli.ListResources(ctx, mcp.ListResourcesRequest{}); err != nil {
-		log.Printf("[sidecar] skip resources from %q: list resources: %v", serverName, err)
+		slog.Warn("skipping resources from upstream", "component", "sidecar", "server", serverName, "error", err)
 	} else {
 		for _, r := range res.Resources {
 			invoker.resourceClient[r.URI] = cli
@@ -129,7 +130,7 @@ func discoverResources(ctx context.Context, serverName string, cli *client.Clien
 	}
 
 	if tmpls, err := cli.ListResourceTemplates(ctx, mcp.ListResourceTemplatesRequest{}); err != nil {
-		log.Printf("[sidecar] skip resource templates from %q: list templates: %v", serverName, err)
+		slog.Warn("skipping resource templates from upstream", "component", "sidecar", "server", serverName, "error", err)
 	} else {
 		for _, t := range tmpls.ResourceTemplates {
 			invoker.resourceTemplates = append(invoker.resourceTemplates, resourceTemplateRoute{
@@ -147,7 +148,7 @@ func discoverResources(ctx context.Context, serverName string, cli *client.Clien
 func discoverPrompts(ctx context.Context, serverName string, cli *client.Client, invoker *SidecarInvoker, catalog *Catalog) {
 	prompts, err := cli.ListPrompts(ctx, mcp.ListPromptsRequest{})
 	if err != nil {
-		log.Printf("[sidecar] skip prompts from %q: list prompts: %v", serverName, err)
+		slog.Warn("skipping prompts from upstream", "component", "sidecar", "server", serverName, "error", err)
 		return
 	}
 	for _, p := range prompts.Prompts {

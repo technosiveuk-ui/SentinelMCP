@@ -15,7 +15,7 @@ package eino
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -98,5 +98,5 @@ var _ gateway.AuditEmitter = (*OTelAuditEmitter)(nil)
 
 // init logs the availability of the OTel audit emitter.
 func init() {
-	log.Println("[audit] OTelAuditEmitter available")
+	slog.Debug("OTelAuditEmitter available", "component", "audit")
 }

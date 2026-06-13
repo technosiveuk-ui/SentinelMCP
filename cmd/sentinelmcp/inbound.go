@@ -16,7 +16,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -118,14 +118,14 @@ func startStreamableHTTP(ctx context.Context, proxy *Proxy, addr, certFile, keyF
 
 	go func() {
 		if certFile != "" && keyFile != "" {
-			log.Printf("[mcp] StreamableHTTP proxy listening on %s (HTTPS)", addr)
+			slog.Info("MCP proxy listening", "addr", addr, "tls", true)
 			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("MCP TLS server error: %v", err)
+				fatalf("MCP TLS server", "error", err)
 			}
 		} else {
-			log.Printf("[mcp] StreamableHTTP proxy listening on %s (HTTP)", addr)
+			slog.Info("MCP proxy listening", "addr", addr, "tls", false)
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("MCP server error: %v", err)
+				fatalf("MCP server", "error", err)
 			}
 		}
 	}()
@@ -133,7 +133,7 @@ func startStreamableHTTP(ctx context.Context, proxy *Proxy, addr, certFile, keyF
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh
-	fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down...\n", sig)
+	slog.Info("shutdown signal received", "signal", sig.String())
 
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

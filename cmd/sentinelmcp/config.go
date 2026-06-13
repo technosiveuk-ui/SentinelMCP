@@ -23,7 +23,7 @@ package main
 
 import (
 	"fmt"
-	"os"
+	"log/slog"
 	"time"
 
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/eino"
@@ -131,7 +131,7 @@ func buildAuditEmitter(cfg *shieldconfig.Config) (gateway.AuditEmitter, error) {
 			sink := createSplunkSink(sc)
 			sinks = append(sinks, sink)
 		default:
-			fmt.Fprintf(os.Stderr, "[warn] unknown SIEM sink type %q, skipping\n", sc.Type)
+			slog.Warn("unknown SIEM sink type, skipping", "type", sc.Type)
 		}
 	}
 
@@ -150,7 +150,7 @@ func buildApprovalProvider(cfg *shieldconfig.Config) (gateway.ApprovalProvider, 
 	case "cli", "":
 		return gateway.NewCLIApprovalProvider(), nil
 	default:
-		fmt.Fprintf(os.Stderr, "[warn] unknown approval provider %q, falling back to CLI\n", cfg.Approval.Provider)
+		slog.Warn("unknown approval provider, falling back to CLI", "provider", cfg.Approval.Provider)
 		return gateway.NewCLIApprovalProvider(), nil
 	}
 }
@@ -173,7 +173,7 @@ func buildMetricsRecorder(cfg *shieldconfig.Config) gateway.MetricsRecorder {
 		ExportInterval: exportInterval,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[warn] OTel metrics initialization failed, metrics disabled: %v\n", err)
+		slog.Warn("OTel metrics initialization failed, metrics disabled", "error", err)
 		return nil
 	}
 	return recorder

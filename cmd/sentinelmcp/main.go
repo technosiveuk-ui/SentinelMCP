@@ -16,9 +16,9 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
-	"log"
+	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/eino"
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/sidecar"
@@ -36,25 +36,30 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Bootstrap a fallback structured logger immediately so even pre-config
+	// messages — including a config-load failure — are structured rather than
+	// raw log output. Reconfigured from the loaded config below.
+	configureLogging(shieldconfig.LogConfig{})
+
 	// ---------------------------------------------------------------
 	// Step 1: Load configuration.
 	// ---------------------------------------------------------------
 	cfg, err := shieldconfig.LoadOrDefault(*configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		fatalf("config load failed", "error", err)
 	}
-	log.Printf("Config loaded (schema=%s, default_risk=%s)", cfg.SchemaVersion, cfg.Global.DefaultRisk)
+	// Reconfigure logging from the now-loaded config (format/level).
+	configureLogging(cfg.Log)
+	slog.Info("config loaded", "schema", cfg.SchemaVersion, "default_risk", cfg.Global.DefaultRisk)
 
 	// Loud warning when strict mode is disabled. Per the loopback-plaintext
 	// principle, plaintext upstreams are acceptable only for trusted
 	// private-network/local upstreams — never production.
 	if !cfg.Sidecar.Strict {
-		log.Println("[warn] sidecar.strict is DISABLED: plaintext (http://) and IP-literal upstreams are permitted. " +
-			"Intended for local/private-network demos only — set sidecar.strict: true in production.")
+		slog.Warn("sidecar.strict is disabled: plaintext (http://) and IP-literal upstreams are permitted — local/private-network demos only, set sidecar.strict: true in production")
 	}
 	if cfg.Sidecar.Strict && len(cfg.Sidecar.EgressAllowlist) == 0 && len(cfg.Sidecar.UpstreamServers) > 0 {
-		log.Println("[warn] sidecar.strict is enabled but sidecar.egress_allowlist is empty — upstream egress is unrestricted. " +
-			"Set sidecar.egress_allowlist in production to bound upstream hosts.")
+		slog.Warn("sidecar.strict is enabled but sidecar.egress_allowlist is empty — upstream egress is unrestricted; set sidecar.egress_allowlist in production to bound upstream hosts")
 	}
 
 	// Build the inbound authenticator from configured API keys. nil means
@@ -65,10 +70,10 @@ func main() {
 		authenticator = auth.NewAPIKeyAuthenticator(cfg.Auth.APIKeys)
 	}
 	if *insecureDevMode {
-		fmt.Fprintln(os.Stderr, "[warn] --insecure-dev-mode: inbound MCP non-loopback TLS/auth requirements are DISABLED. For local dev/demo ONLY.")
+		slog.Warn("--insecure-dev-mode: inbound MCP non-loopback TLS/auth requirements are disabled — for local dev/demo only")
 	}
 	if err := validateInboundBind(cfg.Sidecar.ListenAddr, cfg.Sidecar.TLS.CertFile, cfg.Sidecar.TLS.KeyFile, authenticator, *insecureDevMode); err != nil {
-		log.Fatalf("MCP inbound: %v", err)
+		fatalf("inbound bind policy", "error", err)
 	}
 
 	// ---------------------------------------------------------------
@@ -79,7 +84,7 @@ func main() {
 	// resolve via SENTINELMCP_UPSTREAM_<KEY>_TOKEN.
 	secretsMap, err := secrets.LoadSecretsFile(cfg.Secrets.File)
 	if err != nil {
-		log.Fatalf("secrets: %v", err)
+		fatalf("secrets load", "error", err)
 	}
 	secretsProvider := secrets.NewFileEnvProvider(secretsMap)
 
@@ -96,18 +101,19 @@ func main() {
 	}
 
 	if len(upstreams) == 0 {
-		log.Println("[warn] no upstream MCP servers configured — sidecar will have no tools to proxy")
+		slog.Warn("no upstream MCP servers configured — sidecar will have no tools to proxy")
 	}
 
 	tools, invoker, err := sidecar.Discover(ctx, upstreams, secretsProvider)
 	if err != nil {
-		log.Fatalf("Failed to discover upstream MCP servers: %v", err)
+		fatalf("upstream discovery", "error", err)
 	}
 
-	log.Printf("Discovered %d tools, %d resources, %d prompts from %d upstream servers",
-		len(tools.Tools), len(tools.Resources), len(tools.Prompts), len(upstreams))
+	slog.Info("discovered upstream catalog",
+		"tools", len(tools.Tools), "resources", len(tools.Resources),
+		"prompts", len(tools.Prompts), "upstreams", len(upstreams))
 	for _, t := range tools.Tools {
-		log.Printf("  - tool: %s", t.Name)
+		slog.Debug("proxy tool", "tool", t.Name)
 	}
 
 	// ---------------------------------------------------------------
@@ -115,7 +121,7 @@ func main() {
 	// ---------------------------------------------------------------
 	gwCfg, reloadable, err := buildGatewayConfig(cfg, invoker)
 	if err != nil {
-		log.Fatalf("Failed to build gateway config: %v", err)
+		fatalf("gateway config", "error", err)
 	}
 
 	// Build pipeline with optional BoltDB checkpoint store.
@@ -128,9 +134,9 @@ func main() {
 
 	pipeline, err := eino.BuildGraph(gwCfg, opts...)
 	if err != nil {
-		log.Fatalf("Failed to build gateway pipeline: %v", err)
+		fatalf("gateway pipeline", "error", err)
 	}
-	log.Println("Gateway pipeline constructed.")
+	slog.Info("gateway pipeline constructed")
 
 	// ---------------------------------------------------------------
 	// Hot-reload: policies update without a restart. The ConfigWatcher
@@ -145,31 +151,31 @@ func main() {
 		watcher, err := shieldconfig.NewWatcher(*configPath, func(reloaded *shieldconfig.Config) {
 			next, err := buildPolicy(reloaded)
 			if err != nil {
-				log.Printf("[config] policy reload skipped, keeping previous policy: %v", err)
+				slog.Error("policy reload skipped, keeping previous policy", "error", err)
 				return
 			}
 			reloadable.Set(next)
 			if reloaded.HasPolicies() {
-				log.Printf("[config] policy reloaded: %d action-based rules active", len(reloaded.Policies))
+				slog.Info("policy reloaded", "rules", len(reloaded.Policies), "mode", "action-based")
 			} else {
-				log.Printf("[config] policy reloaded: reverted to risk-based defaults")
+				slog.Info("policy reloaded", "mode", "risk-based")
 			}
 		})
 		if err != nil {
-			log.Fatalf("config watcher: %v", err)
+			fatalf("config watcher", "error", err)
 		}
 		go func() {
 			watcher.Start(ctx)
 			watcher.Close()
 		}()
-		log.Printf("Watching %s for policy changes", *configPath)
+		slog.Info("watching config for policy changes", "path", *configPath)
 	}
 
 	// ---------------------------------------------------------------
 	// Step 4: Create proxy MCP server.
 	// ---------------------------------------------------------------
 	proxy := NewProxy(pipeline, *tools, invoker)
-	log.Printf("Proxy MCP server created with %d tools", len(proxy.ToolNames()))
+	slog.Info("proxy MCP server created", "tools", len(proxy.ToolNames()))
 
 	// ---------------------------------------------------------------
 	// Step 5: Start admin HTTP server (health + resume API).
@@ -185,13 +191,13 @@ func main() {
 
 	admin := NewAdminServer(cfg.Sidecar.HealthAddr, pipeline, WithAdminToken(adminToken))
 	if err := admin.ValidateBind(*insecureAdminBind); err != nil {
-		log.Fatalf("Admin server: %v", err)
+		fatalf("admin server bind policy", "error", err)
 	}
 	if err := admin.Start(); err != nil {
-		log.Fatalf("Failed to start admin server: %v", err)
+		fatalf("admin server start", "error", err)
 	}
 	admin.SetReady(true)
-	log.Printf("Admin server started on %s", cfg.Sidecar.HealthAddr)
+	slog.Info("admin server started", "addr", cfg.Sidecar.HealthAddr)
 
 	// ---------------------------------------------------------------
 	// Step 6: Start MCP proxy server.
@@ -205,6 +211,36 @@ func main() {
 	case "streamable_http":
 		startStreamableHTTP(ctx, proxy, cfg.Sidecar.ListenAddr, cfg.Sidecar.TLS.CertFile, cfg.Sidecar.TLS.KeyFile, authenticator)
 	default:
-		log.Fatalf("Unsupported transport: %s (supported: streamable_http)", transport)
+		fatalf("unsupported transport", "transport", transport, "supported", "streamable_http")
 	}
+}
+
+// configureLogging builds the slog default logger from config and installs it
+// globally. All packages log via the package-level slog functions, which honor
+// this handler — slog.Default() is resolved per call, so the configured handler
+// is always in effect regardless of package init order. Output always goes to
+// stderr so it never collides with the JSON audit stream on stdout. Format
+// defaults to text (human-readable, greppable); operators shipping to a log
+// aggregator set log.format: json.
+func configureLogging(lc shieldconfig.LogConfig) {
+	level, err := shieldconfig.ParseLogLevel(lc.Level)
+	if err != nil {
+		level = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	switch strings.ToLower(strings.TrimSpace(lc.Format)) {
+	case "json":
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	default:
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	}
+	slog.SetDefault(slog.New(handler))
+}
+
+// fatalf logs a fatal startup error via slog and exits 1. Startup failures are
+// fatal by design (fail-closed): the gateway must not run half-initialized.
+func fatalf(msg string, args ...any) {
+	slog.Error(msg, args...)
+	os.Exit(1)
 }

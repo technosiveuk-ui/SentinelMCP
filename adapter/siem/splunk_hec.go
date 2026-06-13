@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -101,8 +101,8 @@ func NewSplunkHECSink(endpoint, token string, opts ...SplunkHECOption) *SplunkHE
 	s.cancel = cancel
 	go s.flushLoop(ctx)
 
-	log.Printf("[siem/splunk] HEC sink initialized (endpoint=%s, batch=%d, flush=%s)",
-		endpoint, s.batchSize, s.flushInterval)
+	slog.Info("Splunk HEC sink initialized",
+		"component", "siem.splunk", "endpoint", endpoint, "batch", s.batchSize, "flush", s.flushInterval)
 
 	return s
 }
@@ -117,7 +117,7 @@ func (s *SplunkHECSink) Write(_ context.Context, entry gateway.AuditEvent) error
 	case s.buf <- entry:
 		return nil
 	default:
-		log.Printf("[siem/splunk] buffer full, dropping audit entry for tool %q", entry.ToolName)
+		slog.Warn("Splunk HEC buffer full, dropping audit entry", "component", "siem.splunk", "tool", entry.ToolName)
 		return fmt.Errorf("siem/splunk: buffer full, entry dropped")
 	}
 }
@@ -133,7 +133,7 @@ func (s *SplunkHECSink) Close() error {
 	// Wait for flusher to exit.
 	<-s.done
 
-	log.Println("[siem/splunk] HEC sink closed")
+	slog.Info("Splunk HEC sink closed", "component", "siem.splunk")
 	return nil
 }
 
@@ -212,7 +212,7 @@ func (s *SplunkHECSink) sendBatch(ctx context.Context, entries []gateway.AuditEv
 		}
 		line, err := json.Marshal(event)
 		if err != nil {
-			log.Printf("[siem/splunk] marshal entry: %v", err)
+			slog.Error("Splunk HEC marshal entry", "component", "siem.splunk", "error", err)
 			continue
 		}
 		body.Write(line)
@@ -242,11 +242,11 @@ func (s *SplunkHECSink) sendBatch(ctx context.Context, entries []gateway.AuditEv
 		if lastErr == nil {
 			return
 		}
-		log.Printf("[siem/splunk] send attempt %d/%d failed: %v", attempt+1, s.maxRetries, lastErr)
+		slog.Warn("Splunk HEC send attempt failed", "component", "siem.splunk", "attempt", attempt+1, "attempts", s.maxRetries, "error", lastErr)
 	}
 
-	log.Printf("[siem/splunk] batch of %d entries dropped after %d retries: %v",
-		len(entries), s.maxRetries, lastErr)
+	slog.Error("Splunk HEC batch dropped after retries",
+		"component", "siem.splunk", "entries", len(entries), "retries", s.maxRetries, "error", lastErr)
 }
 
 // doPost sends a single HTTP POST to the Splunk HEC endpoint.

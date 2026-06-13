@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -115,7 +115,7 @@ func (e *CompositeAuditEmitter) Emit(ctx context.Context, event AuditEvent) erro
 	for _, sink := range e.sinks {
 		if err := sink.Write(ctx, event); err != nil && firstErr == nil {
 			firstErr = err
-			log.Printf("[audit] sink write error: %v", err)
+			slog.Error("audit sink write error", "component", "audit", "error", err)
 		}
 	}
 	return firstErr

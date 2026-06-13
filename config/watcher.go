@@ -15,7 +15,7 @@ package config
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -115,7 +115,7 @@ func (cw *ConfigWatcher) Start(ctx context.Context) {
 			if !ok {
 				return
 			}
-			log.Printf("[config] watcher error: %v", err)
+			slog.Error("config watcher error", "component", "config", "error", err)
 		}
 	}
 }
@@ -124,7 +124,7 @@ func (cw *ConfigWatcher) Start(ctx context.Context) {
 func (cw *ConfigWatcher) reload() {
 	cfg, err := Load(cw.path)
 	if err != nil {
-		log.Printf("[config] reload failed: %v", err)
+		slog.Error("config reload failed, keeping previous config", "component", "config", "error", err)
 		return
 	}
 
@@ -133,7 +133,7 @@ func (cw *ConfigWatcher) reload() {
 	cw.mu.Unlock()
 
 	if fn != nil {
-		log.Printf("[config] reload triggered for %s", cw.path)
+		slog.Info("config reload triggered", "component", "config", "path", cw.path)
 		fn(cfg)
 	}
 }

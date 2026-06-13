@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -87,8 +87,8 @@ func NewFileRotationSink(path string, maxSizeMB, maxBackups int, compress bool) 
 		return nil, fmt.Errorf("siem/file: open %s: %w", path, err)
 	}
 
-	log.Printf("[siem/file] rotation sink initialized (path=%s, maxSize=%dMB, backups=%d, compress=%v)",
-		path, maxSizeMB, maxBackups, compress)
+	slog.Info("file rotation sink initialized",
+		"component", "siem.file", "path", path, "maxSizeMB", maxSizeMB, "backups", maxBackups, "compress", compress)
 
 	return &FileRotationSink{
 		file:       f,
@@ -115,7 +115,7 @@ func (s *FileRotationSink) Write(_ context.Context, entry gateway.AuditEvent) er
 
 	// Check if rotation is needed after writing.
 	if err := s.maybeRotate(); err != nil {
-		log.Printf("[siem/file] rotation check failed: %v", err)
+		slog.Warn("file rotation check failed", "component", "siem.file", "error", err)
 		// Non-fatal — entry was already written.
 	}
 
@@ -130,7 +130,7 @@ func (s *FileRotationSink) Close() error {
 	if s.file != nil {
 		err := s.file.Close()
 		s.file = nil
-		log.Println("[siem/file] rotation sink closed")
+		slog.Info("file rotation sink closed", "component", "siem.file")
 		return err
 	}
 	return nil
@@ -158,7 +158,7 @@ func (s *FileRotationSink) maybeRotate() error {
 	}
 
 	if err := s.rotateBackups(); err != nil {
-		log.Printf("[siem/file] rotation error: %v", err)
+		slog.Error("file rotation error", "component", "siem.file", "error", err)
 	}
 
 	// Open new file.
@@ -169,7 +169,7 @@ func (s *FileRotationSink) maybeRotate() error {
 	s.file = f
 	s.encoder = json.NewEncoder(f)
 
-	log.Printf("[siem/file] rotated %s", s.path)
+	slog.Info("rotated audit file", "component", "siem.file", "path", s.path)
 	return nil
 }
 
@@ -194,7 +194,7 @@ func (s *FileRotationSink) rotateBackups() error {
 	// Move/compress current → .1
 	if s.compress {
 		if err := s.compressFile(s.path, s.backupPath(1)); err != nil {
-			log.Printf("[siem/file] compress failed, falling back to rename: %v", err)
+			slog.Warn("file compress failed, falling back to rename", "component", "siem.file", "error", err)
 			os.Rename(s.path, s.backupPath(1)) // best-effort
 		}
 	} else {

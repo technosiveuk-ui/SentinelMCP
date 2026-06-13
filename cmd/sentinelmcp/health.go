@@ -18,7 +18,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -127,9 +127,9 @@ func (a *AdminServer) SetReady(ready bool) {
 // Start starts the admin HTTP server in a goroutine.
 func (a *AdminServer) Start() error {
 	go func() {
-		log.Printf("[admin] listening on %s", a.server.Addr)
+		slog.Info("admin server listening", "addr", a.server.Addr)
 		if err := a.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[admin] server error: %v", err)
+			slog.Error("admin server error", "error", err)
 		}
 	}()
 	return nil

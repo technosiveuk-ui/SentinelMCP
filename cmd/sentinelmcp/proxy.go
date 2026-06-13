@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -99,7 +99,7 @@ func (p *Proxy) registerTool(meta sidecar.ToolMeta) {
 		},
 	}
 	p.server.AddTools(tool)
-	log.Printf("[proxy] registered tool: %s", meta.Name)
+	slog.Info("registered tool", "component", "proxy", "tool", meta.Name)
 }
 
 // registerResource registers a static upstream resource as a transparent
@@ -112,7 +112,7 @@ func (p *Proxy) registerResource(res mcp.Resource) {
 			return p.forwarder.ReadResource(ctx, req.Params.URI)
 		},
 	})
-	log.Printf("[proxy] registered resource: %s", res.URI)
+	slog.Info("registered resource", "component", "proxy", "resource", res.URI)
 }
 
 // registerResourceTemplate registers an upstream resource template as a
@@ -125,7 +125,7 @@ func (p *Proxy) registerResourceTemplate(tmpl mcp.ResourceTemplate) {
 			return p.forwarder.ReadResource(ctx, req.Params.URI)
 		},
 	})
-	log.Printf("[proxy] registered resource template: %s", tmpl.Name)
+	slog.Info("registered resource template", "component", "proxy", "template", tmpl.Name)
 }
 
 // registerPrompt registers an upstream prompt as a transparent pass-through. The
@@ -134,7 +134,7 @@ func (p *Proxy) registerPrompt(pr mcp.Prompt) {
 	p.server.AddPrompt(pr, func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		return p.forwarder.GetPrompt(ctx, req.Params.Name, req.Params.Arguments)
 	})
-	log.Printf("[proxy] registered prompt: %s", pr.Name)
+	slog.Info("registered prompt", "component", "proxy", "prompt", pr.Name)
 }
 
 // handleToolCall routes a single tool call through the gateway pipeline.

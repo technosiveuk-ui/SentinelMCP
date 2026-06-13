@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -35,6 +36,7 @@ import (
 // Config is the top-level SentinelMCP configuration.
 type Config struct {
 	SchemaVersion string                `yaml:"schema_version"`
+	Log           LogConfig             `yaml:"log"`
 	Global        GlobalConfig          `yaml:"global"`
 	Tools         map[string]ToolConfig `yaml:"tools"`
 	DLPPatterns   map[string]PatternDef `yaml:"dlp_patterns"`
@@ -45,6 +47,15 @@ type Config struct {
 	SIEM          SIEMConfig            `yaml:"siem"`
 	OTel          OTelConfig            `yaml:"otel"`
 	Approval      ApprovalConfig        `yaml:"approval"`
+}
+
+// LogConfig configures structured logging (log/slog). The default text handler is
+// human-readable and greppable; operators shipping to a log aggregator set
+// format: "json". Output always goes to stderr so it never collides with the
+// stdout audit stream. Empty fields fall back to text+info.
+type LogConfig struct {
+	Format string `yaml:"format"` // "text" (default) | "json"
+	Level  string `yaml:"level"`  // "debug" | "info" (default) | "warn" | "error"
 }
 
 // GlobalConfig contains settings that apply to all tools unless overridden.
@@ -305,6 +316,17 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: unsupported schema_version %q (supported: [\"1.0\"])", c.SchemaVersion)
 	}
 
+	// 1b. log.format / log.level must be known (empty = defaults).
+	validLogFormats := map[string]bool{"": true, "text": true, "json": true}
+	if !validLogFormats[c.Log.Format] {
+		return fmt.Errorf("config: log.format must be one of [text, json], got %q", c.Log.Format)
+	}
+	if c.Log.Level != "" {
+		if _, err := ParseLogLevel(c.Log.Level); err != nil {
+			return fmt.Errorf("config: log.level: %w", err)
+		}
+	}
+
 	// 2. global.default_risk must be valid.
 	validRisks := map[string]bool{"low": true, "medium": true, "high": true}
 	if c.Global.DefaultRisk != "" && !validRisks[c.Global.DefaultRisk] {
@@ -499,6 +521,24 @@ func (c *Config) ToDLPPatterns() map[string]gateway.PatternDef {
 	}
 
 	return patterns
+}
+
+// ParseLogLevel maps a config log.level string to an slog.Level. Used by both
+// config validation and the logger bootstrap so the accepted set stays in one
+// place. Empty defaults to info. Returns an actionable error (NFR-12).
+func ParseLogLevel(s string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("must be one of [debug, info, warn, error], got %q", s)
+	}
 }
 
 // parseAction parses a YAML action string into a gateway.Decision. Accepts the

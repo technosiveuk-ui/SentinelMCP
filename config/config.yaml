@@ -3,6 +3,17 @@
 
 schema_version: "1.0"
 
+# ---------------------------------------------------------------------------
+# Structured logging (log/slog)
+# ---------------------------------------------------------------------------
+# Output always goes to stderr so it never collides with the JSON audit stream
+# on stdout. format "text" (default) is human-readable and greppable; set
+# "json" when shipping to a log aggregator (Loki/ELK/Splunk). level defaults to
+# info; set debug for verbose startup/tool-registration output.
+log:
+  format: "text"   # "text" | "json"
+  level: "info"    # "debug" | "info" | "warn" | "error"
+
 global:
   default_risk: low
   audit_output: stdout

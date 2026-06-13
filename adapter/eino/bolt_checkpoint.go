@@ -16,7 +16,7 @@ package eino
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -53,14 +53,18 @@ func NewBoltCheckPointStore(path string) *BoltCheckPointStore {
 	// Ensure parent directory exists.
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Fatalf("[checkpoint] failed to create directory %s: %v", dir, err)
+		// Fatal-by-design: the gateway cannot operate without a working
+		// checkpoint store (interrupt/resume state would be lost).
+		slog.Error("checkpoint: failed to create directory", "component", "checkpoint", "dir", dir, "error", err)
+		os.Exit(1)
 	}
 
 	db, err := bbolt.Open(path, 0600, &bbolt.Options{
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {
-		log.Fatalf("[checkpoint] failed to open BoltDB at %s: %v", path, err)
+		slog.Error("checkpoint: failed to open BoltDB", "component", "checkpoint", "path", path, "error", err)
+		os.Exit(1)
 	}
 
 	// Ensure the bucket exists.
@@ -68,10 +72,11 @@ func NewBoltCheckPointStore(path string) *BoltCheckPointStore {
 		_, err := tx.CreateBucketIfNotExists([]byte(checkpointBucket))
 		return err
 	}); err != nil {
-		log.Fatalf("[checkpoint] failed to create bucket: %v", err)
+		slog.Error("checkpoint: failed to create bucket", "component", "checkpoint", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("[checkpoint] BoltDB store opened at %s", path)
+	slog.Info("checkpoint store opened", "component", "checkpoint", "path", path)
 	return &BoltCheckPointStore{db: db, path: path}
 }
 
@@ -137,7 +142,7 @@ func (s *BoltCheckPointStore) Delete(_ context.Context, id string) error {
 // Must be called during graceful shutdown to avoid corruption.
 func (s *BoltCheckPointStore) Close() error {
 	if s.db != nil {
-		log.Printf("[checkpoint] closing BoltDB store at %s", s.path)
+		slog.Info("closing checkpoint store", "component", "checkpoint", "path", s.path)
 		return s.db.Close()
 	}
 	return nil

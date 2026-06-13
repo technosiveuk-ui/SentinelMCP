@@ -16,7 +16,7 @@ package eino
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -149,8 +149,8 @@ func NewOTelMetricsRecorder(cfg OTelConfig) (*OTelMetricsRecorder, error) {
 		return nil, fmt.Errorf("otel: create approvals counter: %w", err)
 	}
 
-	log.Printf("[otel] metrics recorder initialized (endpoint=%s, service=%s, interval=%s)",
-		cfg.Endpoint, cfg.ServiceName, cfg.ExportInterval)
+	slog.Info("OTel metrics recorder initialized",
+		"component", "otel", "endpoint", cfg.Endpoint, "service", cfg.ServiceName, "interval", cfg.ExportInterval)
 
 	return &OTelMetricsRecorder{
 		provider:    provider,
@@ -205,7 +205,7 @@ func (r *OTelMetricsRecorder) Close() error {
 	if r.provider != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		log.Println("[otel] shutting down meter provider")
+		slog.Info("shutting down OTel meter provider", "component", "otel")
 		return r.provider.Shutdown(ctx)
 	}
 	return nil

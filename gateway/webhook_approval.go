@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -88,16 +88,16 @@ func (p *WebhookApprovalProvider) SendApprovalRequest(ctx context.Context, info 
 
 	resp, err := p.HTTPClient.Do(req)
 	if err != nil {
-		log.Printf("[webhook] approval request failed: %v", err)
+		slog.Error("webhook approval request failed", "component", "webhook", "error", err)
 		return fmt.Errorf("webhook approval: send: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("[webhook] approval endpoint returned %d", resp.StatusCode)
+		slog.Warn("webhook approval endpoint returned non-success", "component", "webhook", "status", resp.StatusCode)
 		return fmt.Errorf("webhook approval: endpoint returned %d", resp.StatusCode)
 	}
 
-	log.Printf("[webhook] approval request sent for tool %q (interrupt=%s)", info.ToolName, info.ID)
+	slog.Info("webhook approval request sent", "component", "webhook", "tool", info.ToolName, "interrupt", info.ID)
 	return nil
 }

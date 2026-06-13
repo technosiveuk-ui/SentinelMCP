@@ -17,7 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 )
@@ -78,7 +78,6 @@ func (e *StdoutAuditEmitter) Emit(_ context.Context, event AuditEvent) error {
 
 // FileAuditEmitter writes one JSON line per audit event to a file.
 type FileAuditEmitter struct {
-	logger  *log.Logger
 	file    *os.File
 	encoder *json.Encoder
 }
@@ -145,7 +144,7 @@ func NewCLIApprovalProvider() *CLIApprovalProvider {
 // The actual approve/deny/modify interaction is handled by the gateway graph's
 // interrupt/resume mechanism, not by this provider.
 func (p *CLIApprovalProvider) SendApprovalRequest(_ context.Context, info InterruptInfo) error {
-	log.Printf("[APPROVAL REQUIRED] Tool: %s | Risk: %s | Reason: %s",
-		info.ToolName, info.RiskLevel, info.Reason)
+	slog.Info("approval required", "component", "approval",
+		"tool", info.ToolName, "risk", info.RiskLevel, "reason", info.Reason)
 	return nil
 }
