@@ -1,0 +1,56 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for SentinelMCP
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Please describe the use case and desired behaviour.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use Case
+      description: What are you trying to achieve that SentinelMCP doesn't support today?
+      placeholder: "I want to … but currently I have to …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work?
+      placeholder: "Add a new config field `…` that allows …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of SentinelMCP would this affect?
+      options:
+        - Gateway core (gateway/)
+        - Sidecar proxy (cmd/sentinelmcp, adapter/sidecar/)
+        - Orchestration adapter (adapter/eino/)
+        - DLP scanner
+        - Policy engine
+        - Config / YAML
+        - Inline SDK
+        - Docker / docker-compose demo
+        - Documentation
+        - Other
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any workarounds or alternative approaches you've tried.
+      placeholder: "I tried using … but it doesn't cover …"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Links, references, examples from other tools, etc.

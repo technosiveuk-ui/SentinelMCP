@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability
+    url: mailto:security@technosive.co.uk
+    about: |
+      Report security vulnerabilities privately.
+      Do NOT open a public GitHub issue for security bugs.
+  - name: Discussions & Questions
+    url: https://github.com/technosiveuk-ui/SentinelMCP/discussions
+    about: Ask questions, share use cases, and discuss ideas.

@@ -1,0 +1,96 @@
+name: Bug Report
+description: Report a bug or unexpected behaviour in SentinelMCP
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below.
+        For **security vulnerabilities**, do **not** file a public issue — email
+        [security@technosive.co.uk](mailto:security@technosive.co.uk) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what went wrong and what you expected to happen.
+      placeholder: "When I call tool X through the sidecar, I expected Y but got Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this?
+      placeholder: |
+        1. Run `sentinelmcp -config config.yaml` with …
+        2. Send a tool call to …
+        3. Observe …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of SentinelMCP is affected?
+      options:
+        - Gateway core (gateway/)
+        - Sidecar proxy (cmd/sentinelmcp, adapter/sidecar/)
+        - Orchestration adapter (adapter/eino/)
+        - DLP scanner
+        - Policy engine
+        - Config / YAML
+        - Inline SDK
+        - Docker / docker-compose demo
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SentinelMCP Version
+      description: Which version or commit are you running?
+      placeholder: "v0.2.0 or commit abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: go_version
+    attributes:
+      label: Go Version
+      description: Output of `go version`
+      placeholder: "go version go1.26.4 darwin/arm64"
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: |
+        Relevant config YAML (redact any secrets!). Use ```yaml fences.
+      placeholder: |
+        ```yaml
+        schema_version: "1.0"
+        global:
+          default_risk: "low"
+        # …
+        ```
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Audit Output
+      description: |
+        Relevant log lines or structured audit events (redact secrets). Use ``` fences.
+      placeholder: |
+        ```
+        sidecar | {"event":"tool_interrupted","tool":"exec_command",…}
+        ```
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Anything else that might help — OS, deployment method, related issues.
