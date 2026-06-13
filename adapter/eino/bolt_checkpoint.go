@@ -116,6 +116,23 @@ func (s *BoltCheckPointStore) Set(_ context.Context, id string, data []byte) err
 	return nil
 }
 
+// Delete removes a checkpoint, invalidating a paused graph so it can no longer
+// be resumed. Used by the approval-timeout registry to expire interrupts so a
+// late resume finds no graph state to execute (Step 5).
+func (s *BoltCheckPointStore) Delete(_ context.Context, id string) error {
+	err := s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(checkpointBucket))
+		if b == nil {
+			return nil // nothing to delete; bucket never created
+		}
+		return b.Delete([]byte(id))
+	})
+	if err != nil {
+		return fmt.Errorf("checkpoint: delete %q: %w", id, err)
+	}
+	return nil
+}
+
 // Close flushes pending writes and releases the database file handle.
 // Must be called during graceful shutdown to avoid corruption.
 func (s *BoltCheckPointStore) Close() error {

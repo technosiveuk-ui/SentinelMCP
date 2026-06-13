@@ -81,6 +81,15 @@ func (s *memCheckpointStore) Set(_ context.Context, id string, data []byte) erro
 	return nil
 }
 
+// Delete removes a checkpoint, invalidating a paused graph so it can no longer be
+// resumed. Used by the approval-timeout registry to expire interrupts (Step 5).
+func (s *memCheckpointStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data, id)
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline implementation
 // ---------------------------------------------------------------------------
