@@ -100,6 +100,7 @@ type graphPipeline struct {
 	compiled compose.Runnable[*gateway.GatewayContext, *gateway.GatewayContext]
 	cfg      *gateway.GatewayConfig
 	store    compose.CheckPointStore
+	registry *interruptRegistry // approval-deadline timers (Step 5)
 	mu       sync.Mutex
 	cpSeq    int64 // atomic counter for checkpoint IDs
 }
@@ -171,6 +172,12 @@ func (p *graphPipeline) Run(ctx context.Context, toolName string, args map[strin
 
 // Resume implements gateway.Pipeline.
 func (p *graphPipeline) Resume(ctx context.Context, interruptInfo gateway.InterruptInfo, approval *gateway.ApprovalDecision) (string, error) {
+	// Gate the resume against the approval deadline. A late resume (the timer
+	// already fired and auto-blocked the call) must not execute the graph.
+	if err := p.registry.Claim(interruptInfo.CheckpointID); err != nil {
+		return "", fmt.Errorf("adapter/eino: resume rejected: %w", err)
+	}
+
 	compiled, err := p.getCompiled(ctx)
 	if err != nil {
 		return "", fmt.Errorf("adapter/eino: compile graph: %w", err)
@@ -240,6 +247,14 @@ func (p *graphPipeline) handleInterrupt(ctx context.Context, info *compose.Inter
 		riskLevel = gateway.RiskLevel(rl)
 	}
 
+	// Per-rule approval deadline (action-based INTERRUPT policies may set one).
+	// Carried through the interrupt info map; 0 => resolveTimeout falls back to
+	// the global default, then the 10m cap — never an unbounded wait.
+	var policyTimeout time.Duration
+	if t, ok := infoMap["timeout"].(time.Duration); ok {
+		policyTimeout = t
+	}
+
 	interruptInfo := gateway.InterruptInfo{
 		ID:           ic.ID,
 		CheckpointID: cpID,
@@ -248,6 +263,11 @@ func (p *graphPipeline) handleInterrupt(ctx context.Context, info *compose.Inter
 		RiskLevel:    riskLevel,
 		Reason:       reason,
 	}
+
+	// Arm the approval-deadline timer. The timer lives outside the suspended
+	// graph (the graph cannot tick its own clock while paused): if it elapses
+	// before a resume, the call is auto-blocked and the checkpoint invalidated.
+	p.registry.Register(cpID, interruptInfo, resolveTimeout(policyTimeout, p.cfg.ApprovalDefaultTimeout), p.onApprovalTimeout)
 
 	// Notify the approval provider (best-effort — don't block on failure).
 	_ = p.cfg.ApprovalProvider.SendApprovalRequest(ctx, interruptInfo)
@@ -273,6 +293,29 @@ func (p *graphPipeline) handleInterrupt(ctx context.Context, info *compose.Inter
 	}
 
 	return "", &gateway.InterruptError{Info: interruptInfo}
+}
+
+// onApprovalTimeout is the registry's expiry callback: an interrupt elapsed
+// without a resume, so the call is auto-blocked. Emitting the block audit and
+// recording the metric here proves the timeout was enforced (compliance),
+// rather than the call merely being abandoned.
+func (p *graphPipeline) onApprovalTimeout(info gateway.InterruptInfo) {
+	ctx := context.Background()
+	_ = p.cfg.AuditEmitter.Emit(ctx, gateway.AuditEvent{
+		Timestamp: time.Now().UTC(),
+		Event:     "tool_blocked",
+		ToolName:  info.ToolName,
+		RiskLevel: info.RiskLevel,
+		Decision:  gateway.DecisionBlock,
+		Error:     "approval_timeout: no approval received within deadline",
+	})
+	if p.cfg.MetricsRecorder != nil {
+		p.cfg.MetricsRecorder.RecordToolCall(ctx, gateway.ToolCallMetric{
+			ToolName:  info.ToolName,
+			Decision:  gateway.DecisionBlock,
+			RiskLevel: info.RiskLevel,
+		})
+	}
 }
 
 // getCompiled lazily compiles the graph (thread-safe, once).
@@ -349,6 +392,9 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 	if store == nil {
 		store = newMemCheckpointStore()
 	}
+	// The approval-timeout registry is gated on the store's Delete capability so
+	// expired interrupts can be invalidated at the checkpoint level too.
+	registry := newInterruptRegistry(store)
 
 	g := compose.NewGraph[*gateway.GatewayContext, *gateway.GatewayContext]()
 
@@ -495,6 +541,7 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 					"args":       gc.Args,
 					"risk_level": string(risk.Level),
 					"reason":     decision.Reason,
+					"timeout":    decision.Timeout,
 				},
 				interruptState,
 			)
@@ -629,9 +676,10 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 	}
 
 	return &graphPipeline{
-		graph: g,
-		cfg:   cfg,
-		store: store,
+		graph:    g,
+		cfg:      cfg,
+		store:    store,
+		registry: registry,
 	}, nil
 }
 
@@ -658,6 +706,7 @@ func inspectResume(ctx context.Context, gc *gateway.GatewayContext, state *toolC
 				"args":       state.Args,
 				"risk_level": string(state.Risk.Level),
 				"reason":     state.Decision.Reason,
+				"timeout":    state.Decision.Timeout,
 			},
 			state,
 		)

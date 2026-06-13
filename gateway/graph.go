@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -82,9 +83,15 @@ type GatewayConfig struct {
 	AuditEmitter            AuditEmitter
 	ApprovalProvider        ApprovalProvider
 	ToolInvoker             ToolInvoker
-	RedactionMask           string          // default: "***REDACTED***"
-	RedactionPreserveLength bool            // true => '█'×length instead of the fixed mask
-	MetricsRecorder         MetricsRecorder // optional: nil = no-op (Sprint 1: not wired)
+	RedactionMask           string // default: "***REDACTED***"
+	RedactionPreserveLength bool   // true => '█'×length instead of the fixed mask
+	// ApprovalDefaultTimeout is the global fallback deadline for an approval
+	// interrupt when the matching policy rule sets no per-rule timeout. Zero =>
+	// the adapter applies its 10m cap, so every interrupt still gets a finite
+	// deadline (fail-closed against unbounded-wait DoS). This is a startup-time
+	// setting; per-rule timeouts hot-reload via the policy.
+	ApprovalDefaultTimeout time.Duration
+	MetricsRecorder        MetricsRecorder // optional: nil = no-op (Sprint 1: not wired)
 }
 
 // Validate checks that all required dependencies are present.

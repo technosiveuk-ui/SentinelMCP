@@ -177,6 +177,11 @@ otel:
 
 approval:
   provider: "cli"                    # "cli" | "webhook"
+  # Fallback deadline for an approval interrupt when the matching policy rule
+  # sets no per-rule `timeout`. Empty => the built-in 10m cap. Every interrupt
+  # gets a finite deadline — an unbounded wait is auto-blocked (fail-closed).
+  # A policy rule's `timeout` overrides this per-tool. Startup-time setting.
+  default_timeout: ""
   webhook:
     url: ""                          # set to enable webhook HITL
     resume_base_url: "http://localhost:9090"

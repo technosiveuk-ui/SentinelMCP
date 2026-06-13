@@ -175,8 +175,12 @@ type OTelConfig struct {
 
 // ApprovalConfig configures the human-in-the-loop approval provider.
 type ApprovalConfig struct {
-	Provider string        `yaml:"provider"` // "cli" | "webhook"
-	Webhook  WebhookConfig `yaml:"webhook"`
+	Provider string `yaml:"provider"` // "cli" | "webhook"
+	// DefaultTimeout is the fallback approval deadline (e.g. "300s", "10m") when
+	// a matching policy rule sets no per-rule timeout. Empty => the adapter's 10m
+	// cap. A non-empty but unparseable or non-positive value fails startup.
+	DefaultTimeout string        `yaml:"default_timeout"`
+	Webhook        WebhookConfig `yaml:"webhook"`
 }
 
 // WebhookConfig configures the generic webhook approval provider.

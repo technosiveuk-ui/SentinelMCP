@@ -61,6 +61,17 @@ func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoke
 	redactor := gateway.NewDefaultRedactor(cfg.Global.RedactionMask)
 	redactor.PreserveLength = preserveLength
 
+	// Approval default timeout: the global fallback deadline for an interrupt
+	// when no per-rule policy timeout applies. Empty => the adapter's 10m cap;
+	// invalid => refuse to start (fail-loud, not a silent cap fallback).
+	var approvalDefaultTimeout time.Duration
+	if cfg.Approval.DefaultTimeout != "" {
+		approvalDefaultTimeout, err = time.ParseDuration(cfg.Approval.DefaultTimeout)
+		if err != nil || approvalDefaultTimeout <= 0 {
+			return nil, nil, fmt.Errorf("approval.default_timeout %q: must be a positive duration", cfg.Approval.DefaultTimeout)
+		}
+	}
+
 	// Audit emitter: use CompositeAuditEmitter composing configured sinks.
 	auditEmitter, err := buildAuditEmitter(cfg)
 	if err != nil {
@@ -83,6 +94,7 @@ func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoke
 		ToolInvoker:             invoker,
 		RedactionMask:           cfg.Global.RedactionMask,
 		RedactionPreserveLength: preserveLength,
+		ApprovalDefaultTimeout:  approvalDefaultTimeout,
 		MetricsRecorder:         buildMetricsRecorder(cfg),
 	}, reloadable, nil
 }
