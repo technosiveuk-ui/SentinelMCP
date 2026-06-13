@@ -62,6 +62,7 @@ This dual-mode architecture is SentinelMCP's key differentiator: competitors lik
 - **Inline SDK (Go)** — Native Go module for in-process enforcement. Sub-millisecond overhead on the Allow path (19μs p99).
 - **Policy Engine** — Local YAML-based policy definitions with hot-reloading. Risk levels (low/medium/high) map to enforcement actions (allow/redact/block/interrupt).
 - **Data Loss Prevention (DLP)** — Regex-based PII and secret redaction in tool arguments and responses. 6 built-in patterns (private keys, passwords, API keys, credit cards, SSNs, emails) plus custom regex support.
+- **Transport & Auth Security** — A security gateway must harden its own transport too. Loopback-plaintext-default with fail-closed hardening: opt-in inbound TLS, API-key authentication, an admin token gating approval-resume, strict mode that rejects plaintext/IP-literal upstreams, upstream cert pinning, outbound credential injection, and an egress allowlist. See [Transport Security](docs/transport-security.md).
 - **Human-in-the-Loop (HITL)** — Interrupt high-risk tool calls via generic Webhooks and resume via a local API endpoint. BoltDB-backed checkpoints for durable interrupt/resume.
 - **Audit Logging** — Structured JSON logging to `stdout` and native OpenTelemetry (OTel) integration for SIEM pipelines.
 - **State Management** — BoltDB-backed checkpoints for durable interrupt/resume across process restarts.
@@ -86,7 +87,13 @@ This architectural boundary provides three major benefits:
 
 ### Proxy Mode
 
-**1. Start the sidecar with Docker:**
+**1. Start the sidecar.** The fastest path is the bundled three-service demo — an upstream MCP server with demo tools, the sidecar, and a test client that exercises every enforcement flow:
+
+```bash
+docker compose up --build --abort-on-container-exit
+```
+
+For a persistent sidecar against your own upstream, run a single container (or locally: `go run ./cmd/sentinelmcp -config policies.yaml`):
 
 ```bash
 docker run --name sentinelmcp \
@@ -95,7 +102,7 @@ docker run --name sentinelmcp \
   ghcr.io/technosiveuk-ui/sentinelmcp:latest
 ```
 
-Port `8080` is the MCP proxy; `9090` is the admin API (health checks and the approval-resume endpoint used by high-risk interrupts). Add `-d` to run detached, then follow logs with `docker logs -f sentinelmcp`.
+Port `8080` is the MCP proxy; `9090` is the admin API (health probes and the approval-resume endpoint used by high-risk interrupts). Add `-d` to run detached, then follow logs with `docker logs -f sentinelmcp`. The example config below binds loopback, which suits a local run; a non-loopback bind (e.g. `0.0.0.0` inside a container) requires TLS or the `--insecure-dev-mode` flag — see [Transport Security](docs/transport-security.md).
 
 **2. Define your policy (`policies.yaml`):**
 
@@ -107,12 +114,22 @@ global:
   redaction_mask: "***REDACTED***"
 
 sidecar:
-  listen_addr: ":8080"
-  health_addr: ":9090"
+  listen_addr: "localhost:8080"     # loopback bind → plaintext HTTP is safe here
+  health_addr: "localhost:9090"     # admin server (health + approval-resume); loopback enforced
   transport: streamable_http
+  strict: false                     # DEMO ONLY — the local upstream below is plaintext. Production
+                                    # MUST set strict: true and dial https:// upstreams.
+  admin_token: ""                   # gates /api/v1/approval/resume — set via SENTINELMCP_ADMIN_TOKEN
+  # tls:                            # opt-in inbound TLS; required when listen_addr is non-loopback
+  #   cert_file: "/etc/sentinelmcp/tls.crt"
+  #   key_file:  "/etc/sentinelmcp/tls.key"
   upstream_servers:                 # your MCP tool servers — at least one is required
     - name: my-tools
       url: "http://localhost:3001/mcp"
+
+auth:
+  api_keys: {}                      # inbound key → principal; enforced on every call when non-empty
+                                    # e.g. { "key-abc": "agent-prod" } via Authorization: Bearer / X-API-Key
 
 tools:
   read_file:
@@ -228,6 +245,23 @@ flowchart LR
 
 ---
 
+## Transport & Auth Security
+
+SentinelMCP is a *security* gateway, so its own transport surface is hardened, not left plaintext. It follows a **loopback-plaintext-default** model: on a loopback address (`127.0.0.1`, `::1`, `localhost`) the sidecar may run plaintext HTTP with no auth — the host boundary carries trust, like `redis` or `postgres` on a local socket. The moment it binds a non-loopback interface or dials a network upstream, it **fail-closes** to TLS and authentication instead of degrading to plaintext.
+
+- **Strict mode (default `true`)** rejects plaintext `http://` and IP-literal upstream URLs at config load.
+- **Inbound TLS** is opt-in on loopback, **required** off-loopback (`sidecar.tls`).
+- **API-key auth** (`auth.api_keys`) validates every inbound call in constant time; the resolved principal reaches the policy and audit layers.
+- **Admin token** (`sidecar.admin_token` / `SENTINELMCP_ADMIN_TOKEN`) always gates the approval-resume endpoint, even on loopback.
+- **Upstream identity** can be pinned per-server (`ca_bundle`, `server_name`, `pinned_sha256`); `InsecureSkipVerify` is never set.
+- **Outbound credentials** are injected from a mode-`0600` `secrets.yaml` or env, and never logged.
+- **Egress allowlist** (`sidecar.egress_allowlist`) bounds which upstream hosts may be dialed.
+- **Secrets at rest**: a group/world-readable `config.yaml` containing secrets, or a `secrets.yaml`, is refused at load.
+
+Full rationale, the bind-policy matrix, and the complete fail-closed contract live in [`docs/transport-security.md`](docs/transport-security.md). The two open-core seams — `gateway/auth.Authenticator` and `gateway/secrets.Provider` — are where Enterprise implementations (mTLS, OAuth2/OIDC, HashiCorp Vault) attach behind the same pure interfaces.
+
+---
+
 ## Architecture
 
 ```
@@ -235,15 +269,20 @@ sentinelmcp/
 ├── gateway/               # Core domain (ZERO Eino imports)
 │   ├── types.go           # GatewayContext, AuditEvent, DLPFinding, RiskLevel, Decision
 │   ├── graph.go           # Pipeline, ToolInvoker, GatewayConfig, MetricsRecorder
-│   ├── policy.go          # Policy interface + DefaultPolicy
-│   ├── redact.go          # DLPScanner, Redactor + RegexDLPScanner + DefaultRedactor
+│   ├── policy.go          # Policy, RiskDB interfaces + DefaultPolicy, YAMLRiskDB
+│   ├── policy_action.go   # Action-based PolicySet (allow/redact/block/interrupt by rule)
+│   ├── policy_reload.go   # Hot policy reload (atomic swap on config change)
+│   ├── redact.go          # DLPScanner, Redactor, ScanArgs + RegexDLPScanner, DefaultRedactor
 │   ├── dlp_multi.go       # MultiDLPScanner (compose regex + external)
 │   ├── dlp_external.go    # DLPEndpoint interface + ExternalDLPScanner adapter
-│   ├── riskdb.go          # RiskDB interface + YAMLRiskDB
 │   ├── audit.go           # AuditEmitter interface + Stdout/FileAuditEmitter
 │   ├── audit_sink.go      # AuditSink + WriterAuditSink + CompositeAuditEmitter
 │   ├── metrics.go         # MetricsRecorder interface + NOPMetricsRecorder
-│   └── webhook_approval.go # WebhookApprovalProvider + CLIApprovalProvider
+│   ├── webhook_approval.go # WebhookApprovalProvider + CLIApprovalProvider
+│   ├── auth/              # Authenticator interface + APIKeyAuthenticator (open-core seam)
+│   │   └── auth.go        #   pure — no net/http; key→principal, constant-time
+│   └── secrets/           # secrets.Provider interface + FileEnvProvider (open-core seam)
+│       └── secrets.go     #   pure — resolves credentials_ref; secrets.yaml (0600) or env
 ├── sdk/                   # Inline SDK: ergonomic builder over gateway + adapter
 │   ├── builder.go         # Builder API (New, With*, StrictDefaults, Build)
 │   ├── func_invoker.go    # FuncInvoker — secure plain Go functions
@@ -291,7 +330,9 @@ sentinelmcp/
 | **DLP** | Regex-based (6 built-in + custom) | Enterprise DLP connectors (API-based) |
 | **HITL Approval** | Generic Webhook + CLI | Corporate communication channels |
 | **Audit** | JSON stdout + OTel | SIEM Aggregation, Compliance PDFs |
-| **Auth** | None (single-tenant) | SSO, RBAC, multi-tenant |
+| **Auth** | API keys (constant-time) | SSO, RBAC, multi-tenant |
+| **Transport** | Loopback-plaintext-default; opt-in TLS, strict mode, cert pinning, egress allowlist | mTLS, OAuth2/OIDC, mesh egress |
+| **Secrets** | File (0600) / env | HashiCorp Vault, AWS/GCP Secret Manager |
 | **State** | BoltDB (local) | Distributed (Postgres) |
 
 > **Note:** The Enterprise Control Plane connects to the sidecar/SDK by implementing the `gateway/` interfaces (`Policy`, `DLPScanner`, `AuditEmitter`, `ApprovalProvider`, etc.). Zero changes to this OSS codebase are required.
