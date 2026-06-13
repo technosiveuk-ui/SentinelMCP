@@ -65,6 +65,20 @@ func (e *recordingEmitter) hasApprovalTimeoutBlock() bool {
 	return false
 }
 
+// hasResumeRejectedBlock reports a tool_blocked audit emitted on a rejected
+// (late/unknown) resume — the compliance record that a resume was attempted
+// after the call was already resolved.
+func (e *recordingEmitter) hasResumeRejectedBlock() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, ev := range e.events {
+		if ev.Event == "tool_blocked" && strings.Contains(ev.Error, "resume_rejected") {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *recordingEmitter) snapshot() []gateway.AuditEvent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -134,6 +148,10 @@ func TestPipeline_ApprovalTimeout_PerRuleAutoBlocks(t *testing.T) {
 	})
 	if !errors.Is(err, ErrCheckpointExpired) {
 		t.Fatalf("late resume: want ErrCheckpointExpired, got %v", err)
+	}
+	// Compliance: the rejected late resume is itself audited.
+	if !emitter.hasResumeRejectedBlock() {
+		t.Fatal("late-resume rejection was not audited")
 	}
 }
 

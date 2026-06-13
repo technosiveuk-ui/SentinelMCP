@@ -175,6 +175,18 @@ func (p *graphPipeline) Resume(ctx context.Context, interruptInfo gateway.Interr
 	// Gate the resume against the approval deadline. A late resume (the timer
 	// already fired and auto-blocked the call) must not execute the graph.
 	if err := p.registry.Claim(interruptInfo.CheckpointID); err != nil {
+		// Compliance: the rejection itself is audited so there is a record that a
+		// resume was attempted after the call was already resolved (blocked on
+		// timeout, or unknown/duplicate) — proving the request stayed blocked,
+		// not silently dropped.
+		_ = p.cfg.AuditEmitter.Emit(ctx, gateway.AuditEvent{
+			Timestamp: time.Now().UTC(),
+			Event:     "tool_blocked",
+			ToolName:  interruptInfo.ToolName,
+			RiskLevel: interruptInfo.RiskLevel,
+			Decision:  gateway.DecisionBlock,
+			Error:     fmt.Sprintf("resume_rejected: %v", err),
+		})
 		return "", fmt.Errorf("adapter/eino: resume rejected: %w", err)
 	}
 
