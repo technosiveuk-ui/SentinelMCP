@@ -29,6 +29,10 @@ import (
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/technosiveuk-ui/sentinelmcp/gateway"
 )
@@ -107,8 +111,20 @@ type graphPipeline struct {
 
 // Run implements gateway.Pipeline.
 func (p *graphPipeline) Run(ctx context.Context, toolName string, args map[string]any) (string, error) {
+	// Root span for the whole call. The per-node child spans (dlp.scan_args,
+	// policy.decide, tool.invoke, dlp.scan_response) added inside the graph
+	// nodes parent to this one via the context Eino threads through the lambdas.
+	// When OTel is disabled, otel.Tracer returns a no-op tracer — zero cost.
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "pipeline.run",
+		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(attribute.String("tool_name", toolName)),
+	)
+	defer span.End()
+
 	compiled, err := p.getCompiled(ctx)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", fmt.Errorf("adapter/eino: compile graph: %w", err)
 	}
 
@@ -127,8 +143,12 @@ func (p *graphPipeline) Run(ctx context.Context, toolName string, args map[strin
 	if err != nil {
 		info, isInterrupt := compose.ExtractInterruptInfo(err)
 		if isInterrupt && info != nil && len(info.InterruptContexts) > 0 {
+			// An interrupt is normal flow (awaiting human approval), not a fault.
+			span.SetAttributes(attribute.String("outcome", "interrupted"))
 			return p.handleInterrupt(ctx, info, toolName, args, cpID, start)
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", fmt.Errorf("adapter/eino: graph invocation failed: %w", err)
 	}
 
@@ -146,6 +166,7 @@ func (p *graphPipeline) Run(ctx context.Context, toolName string, args map[strin
 				Duration:  time.Since(start),
 			})
 		}
+		span.SetAttributes(attribute.String("outcome", "blocked"))
 		return "", fmt.Errorf("gateway: tool call blocked: %s", result.Reason)
 	}
 
@@ -167,11 +188,18 @@ func (p *graphPipeline) Run(ctx context.Context, toolName string, args map[strin
 		})
 	}
 
+	span.SetAttributes(attribute.String("outcome", "ok"))
 	return result.Result, nil
 }
 
 // Resume implements gateway.Pipeline.
 func (p *graphPipeline) Resume(ctx context.Context, interruptInfo gateway.InterruptInfo, approval *gateway.ApprovalDecision) (string, error) {
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "pipeline.resume",
+		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(attribute.String("tool_name", interruptInfo.ToolName)),
+	)
+	defer span.End()
+
 	// Gate the resume against the approval deadline. A late resume (the timer
 	// already fired and auto-blocked the call) must not execute the graph.
 	if err := p.registry.Claim(interruptInfo.CheckpointID); err != nil {
@@ -187,11 +215,15 @@ func (p *graphPipeline) Resume(ctx context.Context, interruptInfo gateway.Interr
 			Decision:  gateway.DecisionBlock,
 			Error:     fmt.Sprintf("resume_rejected: %v", err),
 		})
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", fmt.Errorf("adapter/eino: resume rejected: %w", err)
 	}
 
 	compiled, err := p.getCompiled(ctx)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", fmt.Errorf("adapter/eino: compile graph: %w", err)
 	}
 
@@ -201,8 +233,11 @@ func (p *graphPipeline) Resume(ctx context.Context, interruptInfo gateway.Interr
 	if err != nil {
 		info, isInterrupt := compose.ExtractInterruptInfo(err)
 		if isInterrupt && info != nil && len(info.InterruptContexts) > 0 {
+			span.SetAttributes(attribute.String("outcome", "interrupted"))
 			return p.handleInterrupt(ctx, info, interruptInfo.ToolName, interruptInfo.Args, interruptInfo.CheckpointID, time.Now())
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", fmt.Errorf("adapter/eino: resume invocation failed: %w", err)
 	}
 
@@ -219,6 +254,7 @@ func (p *graphPipeline) Resume(ctx context.Context, interruptInfo gateway.Interr
 				RiskLevel: riskLevel,
 			})
 		}
+		span.SetAttributes(attribute.String("outcome", "blocked"))
 		return "", fmt.Errorf("gateway: tool call blocked: %s", result.Reason)
 	}
 
@@ -240,6 +276,7 @@ func (p *graphPipeline) Resume(ctx context.Context, interruptInfo gateway.Interr
 		})
 	}
 
+	span.SetAttributes(attribute.String("outcome", "ok"))
 	return result.Result, nil
 }
 
@@ -441,7 +478,12 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 		// 1. DLP scan the arguments field-by-field. Each finding is attributed
 		//    to its argument name so that, on a "redact" decision, RedactArgs
 		//    masks exactly the sensitive field instead of an opaque JSON blob.
-		findings, err := gateway.ScanArgs(ctx, cfg.DLPScanner, gc.Args)
+		scanCtx, scanSpan := otel.Tracer(tracerName).Start(ctx, "dlp.scan_args")
+		findings, err := gateway.ScanArgs(scanCtx, cfg.DLPScanner, gc.Args)
+		if err != nil {
+			scanSpan.RecordError(err)
+		}
+		scanSpan.End()
 		if err != nil {
 			gc.Blocked = true
 			gc.Reason = fmt.Sprintf("DLP scan failed: %v (default-deny NFR-07)", err)
@@ -470,7 +512,12 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 			Risk:     risk,
 			Findings: findings,
 		}
-		decision, err := cfg.Policy.Decide(ctx, callCtx)
+		decideCtx, decideSpan := otel.Tracer(tracerName).Start(ctx, "policy.decide")
+		decision, err := cfg.Policy.Decide(decideCtx, callCtx)
+		if err != nil {
+			decideSpan.RecordError(err)
+		}
+		decideSpan.End()
 		if err != nil {
 			// NFR-07: default-deny on Policy error.
 			gc.Blocked = true
@@ -580,7 +627,15 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 			return nil, fmt.Errorf("adapter/eino: run_tool received nil input")
 		}
 
-		result, err := cfg.ToolInvoker.Invoke(ctx, gc.ToolName, gc.Args)
+		invokeCtx, invokeSpan := otel.Tracer(tracerName).Start(ctx, "tool.invoke",
+			trace.WithAttributes(attribute.String("tool_name", gc.ToolName)),
+		)
+		result, err := cfg.ToolInvoker.Invoke(invokeCtx, gc.ToolName, gc.Args)
+		if err != nil {
+			invokeSpan.RecordError(err)
+			invokeSpan.SetStatus(codes.Error, err.Error())
+		}
+		invokeSpan.End()
 		if err != nil {
 			return nil, fmt.Errorf("adapter/eino: tool %q invocation failed: %w", gc.ToolName, err)
 		}
@@ -606,7 +661,12 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 		}
 
 		// DLP scan the response.
-		findings, err := cfg.DLPScanner.Scan(ctx, gc.RawResult)
+		respScanCtx, respScanSpan := otel.Tracer(tracerName).Start(ctx, "dlp.scan_response")
+		findings, err := cfg.DLPScanner.Scan(respScanCtx, gc.RawResult)
+		if err != nil {
+			respScanSpan.RecordError(err)
+		}
+		respScanSpan.End()
 		if err != nil {
 			// Don't block — the tool already ran. Return raw result and log the error.
 			gc.Result = gc.RawResult

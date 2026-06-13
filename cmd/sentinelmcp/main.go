@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/eino"
 	"github.com/technosiveuk-ui/sentinelmcp/adapter/sidecar"
@@ -51,6 +52,13 @@ func main() {
 	// Reconfigure logging from the now-loaded config (format/level).
 	configureLogging(cfg.Log)
 	slog.Info("config loaded", "schema", cfg.SchemaVersion, "default_risk", cfg.Global.DefaultRisk)
+
+	// OTel tracing: per-node spans over the pipeline, gated on the same
+	// otel.enabled flag as metrics and exported to the same OTLP gRPC collector.
+	// Best-effort — a tracer init failure disables tracing but never stops the
+	// gateway (unlike a policy/config error, observability loss is not fatal).
+	tracerShutdown := initTracing(cfg.OTel)
+	defer tracerShutdown()
 
 	// Loud warning when strict mode is disabled. Per the loopback-plaintext
 	// principle, plaintext upstreams are acceptable only for trusted
@@ -243,4 +251,28 @@ func configureLogging(lc shieldconfig.LogConfig) {
 func fatalf(msg string, args ...any) {
 	slog.Error(msg, args...)
 	os.Exit(1)
+}
+
+// initTracing installs the global OTel tracer provider when otel.enabled is set,
+// exporting pipeline spans (pipeline.run/resume roots + per-node child spans)
+// via OTLP gRPC. Returns a no-op shutdown when tracing is disabled or fails to
+// initialize — tracing is best-effort and must never block the gateway.
+func initTracing(oc shieldconfig.OTelConfig) func() {
+	if !oc.Enabled {
+		return func() {}
+	}
+	exportInterval, err := time.ParseDuration(oc.ExportInterval)
+	if err != nil || exportInterval <= 0 {
+		exportInterval = 15 * time.Second
+	}
+	shutdown, err := eino.InitTracer(eino.OTelConfig{
+		Endpoint:       oc.Endpoint,
+		ServiceName:    oc.ServiceName,
+		ExportInterval: exportInterval,
+	})
+	if err != nil {
+		slog.Warn("OTel tracer initialization failed, tracing disabled", "error", err)
+		return func() {}
+	}
+	return func() { _ = shutdown() }
 }
