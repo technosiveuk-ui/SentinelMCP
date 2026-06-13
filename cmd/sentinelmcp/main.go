@@ -113,7 +113,7 @@ func main() {
 	// ---------------------------------------------------------------
 	// Step 3: Build gateway config and pipeline.
 	// ---------------------------------------------------------------
-	gwCfg, err := buildGatewayConfig(cfg, invoker)
+	gwCfg, reloadable, err := buildGatewayConfig(cfg, invoker)
 	if err != nil {
 		log.Fatalf("Failed to build gateway config: %v", err)
 	}
@@ -131,6 +131,39 @@ func main() {
 		log.Fatalf("Failed to build gateway pipeline: %v", err)
 	}
 	log.Println("Gateway pipeline constructed.")
+
+	// ---------------------------------------------------------------
+	// Hot-reload: policies update without a restart. The ConfigWatcher
+	// reloads the whole config on file change; we rebuild the policy from it
+	// and swap it atomically into the ReloadablePolicy the pipeline holds.
+	// Fail-closed on both legs: a malformed file is rejected by Load (the
+	// watcher keeps the previous config and never calls back), and a policy
+	// build error is logged with the previous policy retained — the sidecar
+	// never degrades to allow-all because of a config typo.
+	// ---------------------------------------------------------------
+	if *configPath != "" {
+		watcher, err := shieldconfig.NewWatcher(*configPath, func(reloaded *shieldconfig.Config) {
+			next, err := buildPolicy(reloaded)
+			if err != nil {
+				log.Printf("[config] policy reload skipped, keeping previous policy: %v", err)
+				return
+			}
+			reloadable.Set(next)
+			if reloaded.HasPolicies() {
+				log.Printf("[config] policy reloaded: %d action-based rules active", len(reloaded.Policies))
+			} else {
+				log.Printf("[config] policy reloaded: reverted to risk-based defaults")
+			}
+		})
+		if err != nil {
+			log.Fatalf("config watcher: %v", err)
+		}
+		go func() {
+			watcher.Start(ctx)
+			watcher.Close()
+		}()
+		log.Printf("Watching %s for policy changes", *configPath)
+	}
 
 	// ---------------------------------------------------------------
 	// Step 4: Create proxy MCP server.

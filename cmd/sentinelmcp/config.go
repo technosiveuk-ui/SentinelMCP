@@ -34,10 +34,17 @@ import (
 
 // buildGatewayConfig constructs the gateway configuration from the loaded config.
 // This is the wire-up layer — it creates all gateway interfaces and their
-// implementations based on the YAML config.
-func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoker) (*gateway.GatewayConfig, error) {
-	// Policy engine.
-	policy := gateway.NewDefaultPolicy()
+// implementations based on the YAML config. It returns the ReloadablePolicy
+// wrapping the active policy so the caller can hot-swap it via the config watcher.
+func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoker) (*gateway.GatewayConfig, *gateway.ReloadablePolicy, error) {
+	// Policy engine: action-based PolicySet when policies are configured,
+	// otherwise the risk-based DefaultPolicy. Always wrapped in a ReloadablePolicy
+	// so the watcher can hot-swap it without restarting.
+	policy, err := buildPolicy(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build policy: %w", err)
+	}
+	reloadable := gateway.NewReloadablePolicy(policy)
 
 	// Risk database from YAML tool config.
 	riskDB := cfg.ToRiskDB()
@@ -45,7 +52,7 @@ func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoke
 	// DLP scanner from YAML pattern config.
 	dlpScanner, err := gateway.NewRegexDLPScanner(cfg.ToDLPPatterns())
 	if err != nil {
-		return nil, fmt.Errorf("compile DLP patterns: %w", err)
+		return nil, nil, fmt.Errorf("compile DLP patterns: %w", err)
 	}
 
 	// Redactor with configured mask.
@@ -54,17 +61,17 @@ func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoke
 	// Audit emitter: use CompositeAuditEmitter composing configured sinks.
 	auditEmitter, err := buildAuditEmitter(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("build audit emitter: %w", err)
+		return nil, nil, fmt.Errorf("build audit emitter: %w", err)
 	}
 
 	// Approval provider based on config.
 	approvalProvider, err := buildApprovalProvider(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("build approval provider: %w", err)
+		return nil, nil, fmt.Errorf("build approval provider: %w", err)
 	}
 
 	return &gateway.GatewayConfig{
-		Policy:           policy,
+		Policy:           reloadable, // pipeline holds the reloadable wrapper
 		RiskDB:           riskDB,
 		DLPScanner:       dlpScanner,
 		Redactor:         redactor,
@@ -73,7 +80,19 @@ func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoke
 		ToolInvoker:      invoker,
 		RedactionMask:    cfg.Global.RedactionMask,
 		MetricsRecorder:  buildMetricsRecorder(cfg),
-	}, nil
+	}, reloadable, nil
+}
+
+// buildPolicy resolves the active gateway.Policy from config: the action-based
+// PolicySet when policies are configured (falling back to the risk-based
+// DefaultPolicy for unmatched tools), otherwise the DefaultPolicy alone. Shared
+// by startup and the config watcher's hot-reload path.
+func buildPolicy(cfg *shieldconfig.Config) (gateway.Policy, error) {
+	fallback := gateway.NewDefaultPolicy()
+	if !cfg.HasPolicies() {
+		return fallback, nil
+	}
+	return cfg.ToPolicySet(fallback)
 }
 
 // buildAuditEmitter creates the audit emitter based on config.
