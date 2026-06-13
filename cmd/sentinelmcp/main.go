@@ -46,14 +46,25 @@ func main() {
 	}
 	log.Printf("Config loaded (schema=%s, default_risk=%s)", cfg.SchemaVersion, cfg.Global.DefaultRisk)
 
+	// Loud warning when strict mode is disabled. Per the loopback-plaintext
+	// principle, plaintext upstreams are acceptable only for trusted
+	// private-network/local upstreams — never production.
+	if !cfg.Sidecar.Strict {
+		log.Println("[warn] sidecar.strict is DISABLED: plaintext (http://) and IP-literal upstreams are permitted. " +
+			"Intended for local/private-network demos only — set sidecar.strict: true in production.")
+	}
+
 	// ---------------------------------------------------------------
 	// Step 2: Discover upstream MCP tools.
 	// ---------------------------------------------------------------
 	upstreams := make([]sidecar.UpstreamConfig, 0, len(cfg.Sidecar.UpstreamServers))
 	for _, us := range cfg.Sidecar.UpstreamServers {
 		upstreams = append(upstreams, sidecar.UpstreamConfig{
-			Name: us.Name,
-			URL:  us.URL,
+			Name:         us.Name,
+			URL:          us.URL,
+			CABundle:     us.CABundle,
+			ServerName:   us.ServerName,
+			PinnedSHA256: us.PinnedSHA256,
 		})
 	}
 

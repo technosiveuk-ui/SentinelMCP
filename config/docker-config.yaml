@@ -12,6 +12,11 @@ sidecar:
   listen_addr: ":8080"
   health_addr: ":9090"
   transport: "streamable_http"
+  # DEMO ONLY: strict mode is disabled because the demo upstream serves plaintext
+  # HTTP on the private compose network (loopback-plaintext principle — the
+  # container network boundary carries trust). Production MUST set strict: true
+  # and use https:// upstreams.
+  strict: false
   # The admin server binds a non-loopback address (:9090) so the test-client
   # container can reach the resume API. A non-loopback bind is fail-closed
   # unless the sidecar is started with --insecure-admin-bind AND an admin token.

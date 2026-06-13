@@ -16,6 +16,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 
@@ -74,14 +76,18 @@ type SidecarConfig struct {
 	Transport       string           `yaml:"transport"`       // "stdio" | "streamable_http"
 	HealthAddr      string           `yaml:"health_addr"`     // e.g. "localhost:9090"
 	AdminToken      string           `yaml:"admin_token"`     // gates /api/v1/approval/resume; override via SENTINELMCP_ADMIN_TOKEN
+	Strict          bool             `yaml:"strict"`          // default true: reject http:// + IP-literal upstreams at load (fail-closed)
 	CheckpointPath  string           `yaml:"checkpoint_path"` // BoltDB path, e.g. "./sentinelmcp-checkpoints.db"
 	UpstreamServers []UpstreamConfig `yaml:"upstream_servers"`
 }
 
 // UpstreamConfig describes a single upstream MCP server.
 type UpstreamConfig struct {
-	Name string `yaml:"name"`
-	URL  string `yaml:"url"` // e.g. "http://localhost:3001/mcp"
+	Name         string `yaml:"name"`
+	URL          string `yaml:"url"`          // e.g. "https://fs.local/mcp"
+	CABundle     string `yaml:"ca_bundle"`    // PEM CA bundle: inline PEM or a file path; empty = system roots
+	ServerName   string `yaml:"server_name"`  // TLS SNI / verification hostname override
+	PinnedSHA256 string `yaml:"pinned_sha256"` // hex SHA-256 of the leaf cert SPKI; additional pin on top of chain validation
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +164,7 @@ func DefaultConfig() *Config {
 			ListenAddr:     "localhost:8080",
 			Transport:      "streamable_http",
 			HealthAddr:     "localhost:9090",
+			Strict:         true, // reject http:// + IP-literal upstreams at config load
 			CheckpointPath: "./sentinelmcp-checkpoints.db",
 		},
 		OTel: OTelConfig{
@@ -290,6 +297,39 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// 8. Strict mode (fail-closed, NFR-07 family): reject plaintext (http://) and
+	// IP-literal upstream hosts at load time. Forces TLS + hostname-based
+	// upstreams in production; opt out per the loopback-plaintext principle only
+	// for trusted private-network upstreams. A TLS handshake failure on a real
+	// upstream is enforced later in the adapter (never InsecureSkipVerify).
+	if c.Sidecar.Strict {
+		for _, us := range c.Sidecar.UpstreamServers {
+			if err := validateUpstreamStrict(us); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateUpstreamStrict enforces the strict-mode upstream policy: HTTPS only,
+// hostname (not IP-literal) hosts. Returns an actionable error (NFR-12).
+func validateUpstreamStrict(us UpstreamConfig) error {
+	u, err := url.Parse(us.URL)
+	if err != nil {
+		return fmt.Errorf("config: upstream %q has invalid URL %q: %w", us.Name, us.URL, err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("config: upstream %q URL %q uses plaintext scheme %q, but sidecar.strict is enabled: "+
+			"use https://, or set sidecar.strict: false only for a trusted private-network upstream",
+			us.Name, us.URL, u.Scheme)
+	}
+	if host := u.Hostname(); host != "" && net.ParseIP(host) != nil {
+		return fmt.Errorf("config: upstream %q URL %q uses an IP-literal host %q, but sidecar.strict is enabled: "+
+			"use a hostname (enables SNI, cert SAN matching, and DNS allowlisting)",
+			us.Name, us.URL, host)
+	}
 	return nil
 }
 

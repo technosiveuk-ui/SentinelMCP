@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -29,8 +30,11 @@ import (
 
 // UpstreamConfig describes a single upstream MCP server to connect to.
 type UpstreamConfig struct {
-	Name string // display name
-	URL  string // e.g. "http://localhost:3001/mcp", "stdio:///path/to/binary"
+	Name         string // display name
+	URL          string // e.g. "https://fs.local/mcp"
+	CABundle     string // PEM CA bundle: inline PEM or file path; empty = system roots
+	ServerName   string // TLS SNI / verification hostname override
+	PinnedSHA256 string // hex SHA-256 of leaf cert SPKI; additional pin on top of chain validation
 }
 
 // ToolMeta holds discovered tool metadata for registering on the proxy server.
@@ -81,11 +85,14 @@ func DiscoverTools(ctx context.Context, servers []UpstreamConfig) ([]ToolMeta, *
 // connectUpstream creates an MCP client for the given upstream server URL.
 func connectUpstream(ctx context.Context, srv UpstreamConfig) (*client.Client, error) {
 	var cli *client.Client
-	var err error
 
 	switch {
 	case strings.HasPrefix(srv.URL, "http://"), strings.HasPrefix(srv.URL, "https://"):
-		cli, err = client.NewStreamableHttpClient(srv.URL)
+		httpClient, err := buildUpstreamHTTPClient(srv)
+		if err != nil {
+			return nil, fmt.Errorf("build HTTP client: %w", err)
+		}
+		cli, err = client.NewStreamableHttpClient(srv.URL, transport.WithHTTPBasicClient(httpClient))
 		if err != nil {
 			return nil, fmt.Errorf("create HTTP client: %w", err)
 		}
