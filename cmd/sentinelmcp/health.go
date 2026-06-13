@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -24,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	eino "github.com/technosiveuk-ui/sentinelmcp/adapter/eino"
 	"github.com/technosiveuk-ui/sentinelmcp/gateway"
 )
 
@@ -214,6 +216,13 @@ func (a *AdminServer) handleResume(w http.ResponseWriter, r *http.Request) {
 
 	result, err := a.pipeline.Resume(r.Context(), interruptInfo, approval)
 	if err != nil {
+		// An unknown, already-resumed, or expired (auto-blocked) checkpoint is a
+		// client error — the approval target is gone — not a server fault. Real
+		// failures (graph re-execution, checkpoint store) stay 500.
+		if errors.Is(err, eino.ErrUnknownInterrupt) || errors.Is(err, eino.ErrCheckpointExpired) {
+			http.Error(w, fmt.Sprintf("resume failed: %v", err), http.StatusGone)
+			return
+		}
 		http.Error(w, fmt.Sprintf("resume failed: %v", err), http.StatusInternalServerError)
 		return
 	}

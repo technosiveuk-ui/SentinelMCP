@@ -20,6 +20,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -175,6 +176,23 @@ type AuditEvent struct {
 	TraceID    string        `json:"trace_id,omitempty"`
 	SessionID  string        `json:"session_id,omitempty"`
 	Error      string        `json:"error,omitempty"`
+}
+
+// MarshalJSON serializes Latency as whole milliseconds rather than the
+// nanoseconds a bare time.Duration would emit. The JSON tag is latency_ms and
+// the audit stream is consumed by operators and SIEM tooling that read it as
+// milliseconds; emitting nanoseconds under an _ms tag was a unit mismatch. All
+// other fields keep their default marshalling via the type alias.
+func (e AuditEvent) MarshalJSON() ([]byte, error) {
+	type alias AuditEvent
+	aux := struct {
+		alias
+		Latency int64 `json:"latency_ms,omitempty"`
+	}{
+		alias:   alias(e),
+		Latency: e.Latency.Milliseconds(),
+	}
+	return json.Marshal(aux)
 }
 
 // ---------------------------------------------------------------------------
