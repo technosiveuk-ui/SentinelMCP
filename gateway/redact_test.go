@@ -15,6 +15,7 @@ package gateway
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -155,7 +156,7 @@ func TestDefaultRedactor_Redact_OverlappingFindings(t *testing.T) {
 
 func TestRedactArgs_NoRedaction(t *testing.T) {
 	args := map[string]any{"key": "value", "other": 42}
-	result := RedactArgs(args, nil, "***")
+	result := RedactArgs(args, nil, "***", false)
 	if len(result) != len(args) {
 		t.Errorf("expected same number of keys, got %d", len(result))
 	}
@@ -173,9 +174,53 @@ func TestRedactArgs_WithRedactedFields(t *testing.T) {
 		},
 	}
 
-	result := RedactArgs(args, decision, "[MASK]")
+	result := RedactArgs(args, decision, "[MASK]", false)
 	if result["password"] != "[MASK]" {
 		t.Errorf("expected redacted password, got %v", result["password"])
+	}
+	if result["name"] != "alice" {
+		t.Errorf("expected unchanged name, got %v", result["name"])
+	}
+}
+
+func TestDefaultRedactor_Redact_PreserveLength(t *testing.T) {
+	r := NewDefaultRedactor("***REDACTED***")
+	r.PreserveLength = true
+	// "key=" is 4 bytes; secret "AKIAIOSFODNN7EXAMPLE" is 20 bytes.
+	content := "key=AKIAIOSFODNN7EXAMPLE tail"
+	findings := []DLPFinding{
+		{Pattern: "AWS", Value: "AKIAIOSFODNN7EXAMPLE", Position: 4, EndIdx: 24},
+	}
+	got := r.Redact(content, findings)
+	want := "key=" + strings.Repeat("█", 20) + " tail"
+	if got != want {
+		t.Fatalf("preserve_length: got %q want %q", got, want)
+	}
+}
+
+func TestDefaultRedactor_Redact_PreserveLength_Multiple(t *testing.T) {
+	r := NewDefaultRedactor("***REDACTED***")
+	r.PreserveLength = true
+	content := "a=ghp_123 b=cd"
+	// two findings: "ghp_123" (7 bytes at 2), "cd" (2 bytes at 12)
+	findings := []DLPFinding{
+		{Pattern: "GH", Value: "ghp_123", Position: 2, EndIdx: 9},
+		{Pattern: "X", Value: "cd", Position: 12, EndIdx: 14},
+	}
+	got := r.Redact(content, findings)
+	want := "a=" + strings.Repeat("█", 7) + " b=" + strings.Repeat("█", 2)
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestRedactArgs_PreserveLength(t *testing.T) {
+	args := map[string]any{"password": "secret123", "name": "alice"}
+	decision := &DecisionResult{Decision: DecisionRedact, RedactedArgs: map[string]string{"password": "x"}}
+	result := RedactArgs(args, decision, "***REDACTED***", true)
+	// "secret123" is 9 bytes -> 9 blocks; name untouched.
+	if result["password"] != strings.Repeat("█", 9) {
+		t.Fatalf("expected 9 blocks, got %v", result["password"])
 	}
 	if result["name"] != "alice" {
 		t.Errorf("expected unchanged name, got %v", result["name"])

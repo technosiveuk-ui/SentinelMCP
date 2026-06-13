@@ -53,6 +53,7 @@ type GlobalConfig struct {
 	AuditOutput        string            `yaml:"audit_output"`
 	AuditFile          string            `yaml:"audit_file"`
 	RedactionMask      string            `yaml:"redaction_mask"`
+	RedactionStyle     string            `yaml:"redaction_style"` // "mask" (default) | "preserve_length"
 	DefaultDLPPatterns []string          `yaml:"default_dlp_patterns"`
 	PolicyDefaults     map[string]string `yaml:"policy_defaults"`
 }
@@ -315,6 +316,12 @@ func (c *Config) Validate() error {
 	// 4. file output requires audit_file path.
 	if c.Global.AuditOutput == "file" && c.Global.AuditFile == "" {
 		return fmt.Errorf("config: global.audit_file is required when global.audit_output is \"file\"")
+	}
+
+	// 4b. global.redaction_style must be a known mode (empty = default "mask").
+	validStyles := map[string]bool{"": true, "mask": true, "preserve_length": true}
+	if !validStyles[c.Global.RedactionStyle] {
+		return fmt.Errorf("config: global.redaction_style must be one of [mask, preserve_length], got %q", c.Global.RedactionStyle)
 	}
 
 	// 5. Each tool's risk must be valid.

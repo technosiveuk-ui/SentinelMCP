@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -170,9 +171,14 @@ type Redactor interface {
 // DefaultRedactor implements Redactor using simple string replacement.
 type DefaultRedactor struct {
 	Mask string // default: "***REDACTED***"
+	// PreserveLength replaces each finding with '█' repeated for its byte length
+	// (finding.EndIdx - finding.Position), instead of the fixed Mask. This keeps
+	// the structure/layout of redacted content visible (e.g. "key=████████") at
+	// the cost of revealing the secret's length. Opt in via redaction_style.
+	PreserveLength bool
 }
 
-// NewDefaultRedactor creates a Redactor with the given mask.
+// NewDefaultRedactor creates a Redactor with the given mask (fixed-mask mode).
 func NewDefaultRedactor(mask string) *DefaultRedactor {
 	if mask == "" {
 		mask = "***REDACTED***"
@@ -182,7 +188,7 @@ func NewDefaultRedactor(mask string) *DefaultRedactor {
 
 // Redact implements Redactor.
 // Handles overlapping matches by sorting findings by position (descending)
-// and replacing from end to start.
+// and replacing from end to start, so earlier byte offsets stay valid.
 func (r *DefaultRedactor) Redact(content string, findings []DLPFinding) string {
 	if len(findings) == 0 {
 		return content
@@ -201,12 +207,21 @@ func (r *DefaultRedactor) Redact(content string, findings []DLPFinding) string {
 		if end == 0 {
 			end = f.Position + len(f.Value)
 		}
-		if end > len(result) {
-			continue // out of bounds, skip
+		if f.Position < 0 || end > len(result) || f.Position > end {
+			continue // out of bounds / invalid span, skip
 		}
-		result = result[:f.Position] + r.Mask + result[end:]
+		result = result[:f.Position] + r.replacement(end-f.Position) + result[end:]
 	}
 	return result
+}
+
+// replacement returns the string substituted for a finding of the given byte
+// length: a length-preserving run of '█' when PreserveLength is set, else Mask.
+func (r *DefaultRedactor) replacement(length int) string {
+	if r.PreserveLength && length > 0 {
+		return strings.Repeat("█", length)
+	}
+	return r.Mask
 }
 
 // ---------------------------------------------------------------------------
@@ -214,20 +229,35 @@ func (r *DefaultRedactor) Redact(content string, findings []DLPFinding) string {
 // ---------------------------------------------------------------------------
 
 // RedactArgs redacts argument fields identified in the DecisionResult.
-// Returns a new map; does not modify the input.
-func RedactArgs(args map[string]any, result *DecisionResult, mask string) map[string]any {
+// Returns a new map; does not modify the input. When preserveLength is true,
+// each redacted value is replaced with '█' repeated for its rendered length
+// (consistent with the response redactor's preserve_length style); otherwise the
+// fixed mask is used.
+func RedactArgs(args map[string]any, result *DecisionResult, mask string, preserveLength bool) map[string]any {
 	if result == nil || len(result.RedactedArgs) == 0 {
 		return args
 	}
 	redacted := make(map[string]any, len(args))
 	for k, v := range args {
 		if _, ok := result.RedactedArgs[k]; ok {
-			redacted[k] = mask
+			redacted[k] = maskedValue(v, mask, preserveLength)
 		} else {
 			redacted[k] = v
 		}
 	}
 	return redacted
+}
+
+// maskedValue returns the replacement for a redacted argument value: a
+// length-preserving run of '█' when preserveLength is set, otherwise mask.
+func maskedValue(v any, mask string, preserveLength bool) any {
+	if !preserveLength {
+		return mask
+	}
+	if l := len(argToString(v)); l > 0 {
+		return strings.Repeat("█", l)
+	}
+	return mask
 }
 
 // ---------------------------------------------------------------------------

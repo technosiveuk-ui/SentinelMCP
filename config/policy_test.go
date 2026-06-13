@@ -150,3 +150,21 @@ policies:
 		t.Fatal("expected error for invalid timeout")
 	}
 }
+
+func TestValidate_RedactionStyle(t *testing.T) {
+	p := writeConfigAt(t, 0o600, `schema_version: "1.0"
+global:
+  redaction_style: preserve_length
+`)
+	if _, err := config.Load(p); err != nil {
+		t.Fatalf("preserve_length should be valid: %v", err)
+	}
+
+	p = writeConfigAt(t, 0o600, `schema_version: "1.0"
+global:
+  redaction_style: scramble
+`)
+	if _, err := config.Load(p); err == nil {
+		t.Fatal("expected error for invalid redaction_style")
+	}
+}

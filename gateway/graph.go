@@ -75,15 +75,16 @@ type Pipeline interface {
 // GatewayConfig holds the dependencies for constructing a gateway Pipeline.
 // All fields reference framework-agnostic interfaces defined in this package.
 type GatewayConfig struct {
-	Policy           Policy
-	RiskDB           RiskDB
-	DLPScanner       DLPScanner
-	Redactor         Redactor
-	AuditEmitter     AuditEmitter
-	ApprovalProvider ApprovalProvider
-	ToolInvoker      ToolInvoker
-	RedactionMask    string          // default: "***REDACTED***"
-	MetricsRecorder  MetricsRecorder // optional: nil = no-op (Sprint 1: not wired)
+	Policy                  Policy
+	RiskDB                  RiskDB
+	DLPScanner              DLPScanner
+	Redactor                Redactor
+	AuditEmitter            AuditEmitter
+	ApprovalProvider        ApprovalProvider
+	ToolInvoker             ToolInvoker
+	RedactionMask           string          // default: "***REDACTED***"
+	RedactionPreserveLength bool            // true => '█'×length instead of the fixed mask
+	MetricsRecorder         MetricsRecorder // optional: nil = no-op (Sprint 1: not wired)
 }
 
 // Validate checks that all required dependencies are present.

@@ -442,7 +442,7 @@ func BuildGraph(cfg *gateway.GatewayConfig, opts ...GraphOption) (gateway.Pipeli
 
 		case gateway.DecisionRedact:
 			// Apply arg redaction before passing to run_tool.
-			gc.Args = gateway.RedactArgs(gc.Args, decision, cfg.RedactionMask)
+			gc.Args = gateway.RedactArgs(gc.Args, decision, cfg.RedactionMask, cfg.RedactionPreserveLength)
 			_ = cfg.AuditEmitter.Emit(ctx, gateway.AuditEvent{
 				Timestamp:  time.Now().UTC(),
 				Event:      "tool_start",

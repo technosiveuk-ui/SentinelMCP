@@ -55,8 +55,11 @@ func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoke
 		return nil, nil, fmt.Errorf("compile DLP patterns: %w", err)
 	}
 
-	// Redactor with configured mask.
+	// Redactor with configured mask. redaction_style "preserve_length" swaps the
+	// fixed mask for a length-preserving run of '█' (reveals length; opt-in).
+	preserveLength := cfg.Global.RedactionStyle == "preserve_length"
 	redactor := gateway.NewDefaultRedactor(cfg.Global.RedactionMask)
+	redactor.PreserveLength = preserveLength
 
 	// Audit emitter: use CompositeAuditEmitter composing configured sinks.
 	auditEmitter, err := buildAuditEmitter(cfg)
@@ -71,15 +74,16 @@ func buildGatewayConfig(cfg *shieldconfig.Config, invoker *sidecar.SidecarInvoke
 	}
 
 	return &gateway.GatewayConfig{
-		Policy:           reloadable, // pipeline holds the reloadable wrapper
-		RiskDB:           riskDB,
-		DLPScanner:       dlpScanner,
-		Redactor:         redactor,
-		AuditEmitter:     auditEmitter,
-		ApprovalProvider: approvalProvider,
-		ToolInvoker:      invoker,
-		RedactionMask:    cfg.Global.RedactionMask,
-		MetricsRecorder:  buildMetricsRecorder(cfg),
+		Policy:                  reloadable, // pipeline holds the reloadable wrapper
+		RiskDB:                  riskDB,
+		DLPScanner:              dlpScanner,
+		Redactor:                redactor,
+		AuditEmitter:            auditEmitter,
+		ApprovalProvider:        approvalProvider,
+		ToolInvoker:             invoker,
+		RedactionMask:           cfg.Global.RedactionMask,
+		RedactionPreserveLength: preserveLength,
+		MetricsRecorder:         buildMetricsRecorder(cfg),
 	}, reloadable, nil
 }
 
