@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -77,9 +78,10 @@ type SidecarConfig struct {
 	ListenAddr      string           `yaml:"listen_addr"`     // e.g. "localhost:8080"
 	Transport       string           `yaml:"transport"`       // "stdio" | "streamable_http"
 	HealthAddr      string           `yaml:"health_addr"`     // e.g. "localhost:9090"
-	AdminToken      string           `yaml:"admin_token"`     // gates /api/v1/approval/resume; override via SENTINELMCP_ADMIN_TOKEN
-	Strict          bool             `yaml:"strict"`          // default true: reject http:// + IP-literal upstreams at load (fail-closed)
-	CheckpointPath  string           `yaml:"checkpoint_path"` // BoltDB path, e.g. "./sentinelmcp-checkpoints.db"
+	AdminToken      string           `yaml:"admin_token"`      // gates /api/v1/approval/resume; override via SENTINELMCP_ADMIN_TOKEN
+	Strict          bool             `yaml:"strict"`           // default true: reject http:// + IP-literal upstreams at load (fail-closed)
+	EgressAllowlist []string         `yaml:"egress_allowlist"` // host suffixes; when set, upstream hosts must match (IPs must match exactly)
+	CheckpointPath  string           `yaml:"checkpoint_path"`  // BoltDB path, e.g. "./sentinelmcp-checkpoints.db"
 	TLS             TLSConfig        `yaml:"tls"`             // opt-in inbound TLS; required when listen_addr is non-loopback
 	UpstreamServers []UpstreamConfig `yaml:"upstream_servers"`
 }
@@ -327,40 +329,79 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// 8. Strict mode (fail-closed, NFR-07 family): reject plaintext (http://) and
-	// IP-literal upstream hosts at load time. Forces TLS + hostname-based
-	// upstreams in production; opt out per the loopback-plaintext principle only
-	// for trusted private-network upstreams. A TLS handshake failure on a real
-	// upstream is enforced later in the adapter (never InsecureSkipVerify).
-	if c.Sidecar.Strict {
-		for _, us := range c.Sidecar.UpstreamServers {
-			if err := validateUpstreamStrict(us); err != nil {
-				return err
-			}
+	// 8. Upstream transport + egress policy (fail-closed, NFR-07 family). In
+	// strict mode, reject plaintext (http://) schemes and IP-literal hosts
+	// (unless the IP is an exact egress_allowlist entry). When an egress
+	// allowlist is set, require every upstream host to match it. Forces TLS +
+	// bounded, hostname-based egress in production.
+	for _, us := range c.Sidecar.UpstreamServers {
+		if err := validateUpstream(us, c.Sidecar.Strict, c.Sidecar.EgressAllowlist); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// validateUpstreamStrict enforces the strict-mode upstream policy: HTTPS only,
-// hostname (not IP-literal) hosts. Returns an actionable error (NFR-12).
-func validateUpstreamStrict(us UpstreamConfig) error {
+// validateUpstream enforces the strict-mode scheme/IP policy and the egress
+// allowlist for a single upstream. Returns an actionable error (NFR-12).
+func validateUpstream(us UpstreamConfig, strict bool, allowlist []string) error {
 	u, err := url.Parse(us.URL)
 	if err != nil {
 		return fmt.Errorf("config: upstream %q has invalid URL %q: %w", us.Name, us.URL, err)
 	}
-	if u.Scheme != "https" {
-		return fmt.Errorf("config: upstream %q URL %q uses plaintext scheme %q, but sidecar.strict is enabled: "+
-			"use https://, or set sidecar.strict: false only for a trusted private-network upstream",
-			us.Name, us.URL, u.Scheme)
+	host := u.Hostname()
+
+	if strict {
+		if u.Scheme != "https" {
+			return fmt.Errorf("config: upstream %q URL %q uses plaintext scheme %q, but sidecar.strict is enabled: "+
+				"use https://, or set sidecar.strict: false only for a trusted private-network upstream",
+				us.Name, us.URL, u.Scheme)
+		}
+		// IP literals are rejected in strict mode unless they are an exact
+		// egress_allowlist entry (IPs defeat SNI, cert SAN matching, and
+		// hostname-based allowlisting, so they must be opt-in explicit).
+		if host != "" && net.ParseIP(host) != nil && !hostAllowed(host, allowlist) {
+			return fmt.Errorf("config: upstream %q URL %q uses an IP-literal host %q, but sidecar.strict is enabled: "+
+				"use a hostname, or add the exact IP to sidecar.egress_allowlist",
+				us.Name, us.URL, host)
+		}
 	}
-	if host := u.Hostname(); host != "" && net.ParseIP(host) != nil {
-		return fmt.Errorf("config: upstream %q URL %q uses an IP-literal host %q, but sidecar.strict is enabled: "+
-			"use a hostname (enables SNI, cert SAN matching, and DNS allowlisting)",
-			us.Name, us.URL, host)
+
+	if len(allowlist) > 0 && !hostAllowed(host, allowlist) {
+		return fmt.Errorf("config: upstream %q host %q is not permitted by sidecar.egress_allowlist %q",
+			us.Name, host, allowlist)
 	}
+
 	return nil
+}
+
+// hostAllowed reports whether host matches the egress allowlist. Hostnames match
+// by exact or suffix (subdomain) entry — ".local" matches "fs.local"; IP
+// literals match by exact entry only (suffix matching on IPs is unsafe).
+func hostAllowed(host string, allowlist []string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	isIP := net.ParseIP(host) != nil
+	for _, raw := range allowlist {
+		entry := strings.ToLower(strings.TrimSpace(raw))
+		entry = strings.TrimPrefix(entry, ".")
+		if entry == "" {
+			continue
+		}
+		if isIP {
+			if host == entry {
+				return true
+			}
+			continue
+		}
+		if host == entry || strings.HasSuffix(host, "."+entry) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------

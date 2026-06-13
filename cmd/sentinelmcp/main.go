@@ -52,6 +52,10 @@ func main() {
 		log.Println("[warn] sidecar.strict is DISABLED: plaintext (http://) and IP-literal upstreams are permitted. " +
 			"Intended for local/private-network demos only — set sidecar.strict: true in production.")
 	}
+	if cfg.Sidecar.Strict && len(cfg.Sidecar.EgressAllowlist) == 0 && len(cfg.Sidecar.UpstreamServers) > 0 {
+		log.Println("[warn] sidecar.strict is enabled but sidecar.egress_allowlist is empty — upstream egress is unrestricted. " +
+			"Set sidecar.egress_allowlist in production to bound upstream hosts.")
+	}
 
 	// Build the inbound authenticator from configured API keys. nil means
 	// anonymous — permitted only on loopback or in dev mode; the bind policy

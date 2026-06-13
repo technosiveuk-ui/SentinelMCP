@@ -71,6 +71,10 @@ sidecar:
   listen_addr: "localhost:8080"
   transport: "streamable_http"       # "stdio" | "streamable_http"
   strict: true                       # reject http:// + IP-literal upstreams at load (fail-closed); false only for trusted private-network upstreams
+  # Egress allowlist: when non-empty, every upstream host must match (hostname
+  # suffix or exact IP). Empty = no egress restriction (warns under strict).
+  #   egress_allowlist: [".internal.company.com", "10.0.0.5"]
+  egress_allowlist: []
   health_addr: "localhost:9090"
   # Gates the privileged /api/v1/approval/resume endpoint. Required when
   # health_addr is non-loopback (fail-closed). Prefer the SENTINELMCP_ADMIN_TOKEN
