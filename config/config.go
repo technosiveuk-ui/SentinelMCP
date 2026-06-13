@@ -21,6 +21,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -37,6 +38,7 @@ type Config struct {
 	Global        GlobalConfig          `yaml:"global"`
 	Tools         map[string]ToolConfig `yaml:"tools"`
 	DLPPatterns   map[string]PatternDef `yaml:"dlp_patterns"`
+	Policies      []PolicyDef           `yaml:"policies"`
 	Sidecar       SidecarConfig         `yaml:"sidecar"`
 	Auth          AuthConfig            `yaml:"auth"`
 	Secrets       SecretsConfig         `yaml:"secrets"`
@@ -67,6 +69,19 @@ type ToolConfig struct {
 type PatternDef struct {
 	Regex string `yaml:"regex"`
 	Type  string `yaml:"type"` // "secret" | "pii" | "custom"
+}
+
+// PolicyDef defines one action-based policy rule. The action-based layer
+// composes with the existing risk model: a rule matches a tools/call when the
+// tool name matches any Tools glob and, if Risk is set, the call's risk is at
+// least Risk. The first matching rule (in order) wins.
+type PolicyDef struct {
+	Name       string   `yaml:"name"`       // required; surfaced in audit
+	Tools      []string `yaml:"tools"`      // required; glob patterns
+	Action     string   `yaml:"action"`     // required; ALLOW | BLOCK | REDACT | INTERRUPT
+	Risk       string   `yaml:"risk"`       // optional threshold; low | medium | high
+	Inspection []string `yaml:"inspection"` // DLP categories on REDACT (Step 3); e.g. pii, secrets
+	Timeout    string   `yaml:"timeout"`    // INTERRUPT timeout override (Step 5); e.g. 300s
 }
 
 // ---------------------------------------------------------------------------
@@ -329,7 +344,36 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// 8. Upstream transport + egress policy (fail-closed, NFR-07 family). In
+	// 8. Action-based policies (compose with the risk model). Validated at load
+	// so a malformed initial policies section is fatal (fail-loud at startup),
+	// and a malformed hot-reload is rejected before the swap (fail-closed).
+	seenPolicyNames := make(map[string]bool, len(c.Policies))
+	for i, p := range c.Policies {
+		if p.Name == "" {
+			return fmt.Errorf("config: policies[%d].name is required", i)
+		}
+		if seenPolicyNames[p.Name] {
+			return fmt.Errorf("config: policies[%d].name %q is duplicate (policy names must be unique)", i, p.Name)
+		}
+		seenPolicyNames[p.Name] = true
+
+		if len(p.Tools) == 0 {
+			return fmt.Errorf("config: policies[%d] (%q): tools is required (at least one glob)", i, p.Name)
+		}
+		if _, err := parseAction(p.Action); err != nil {
+			return fmt.Errorf("config: policies[%d] (%q): %w", i, p.Name, err)
+		}
+		if p.Risk != "" && !validRisks[p.Risk] {
+			return fmt.Errorf("config: policies[%d] (%q): risk must be one of [low, medium, high], got %q", i, p.Name, p.Risk)
+		}
+		if p.Timeout != "" {
+			if d, err := time.ParseDuration(p.Timeout); err != nil || d <= 0 {
+				return fmt.Errorf("config: policies[%d] (%q): timeout must be a positive duration (e.g. 300s), got %q", i, p.Name, p.Timeout)
+			}
+		}
+	}
+
+	// 9. Upstream transport + egress policy (fail-closed, NFR-07 family). In
 	// strict mode, reject plaintext (http://) schemes and IP-literal hosts
 	// (unless the IP is an exact egress_allowlist entry). When an egress
 	// allowlist is set, require every upstream host to match it. Forces TLS +
@@ -445,3 +489,57 @@ func (c *Config) ToDLPPatterns() map[string]gateway.PatternDef {
 
 	return patterns
 }
+
+// parseAction parses a YAML action string into a gateway.Decision. Accepts the
+// short INTERRUPT form as well as the canonical interrupt_for_approval value,
+// case-insensitively. Returns an actionable error (NFR-12).
+func parseAction(s string) (gateway.Decision, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "allow":
+		return gateway.DecisionAllow, nil
+	case "block":
+		return gateway.DecisionBlock, nil
+	case "redact":
+		return gateway.DecisionRedact, nil
+	case "interrupt", "interrupt_for_approval":
+		return gateway.DecisionInterruptForApproval, nil
+	case "":
+		return "", fmt.Errorf("action is required (ALLOW | BLOCK | REDACT | INTERRUPT)")
+	default:
+		return "", fmt.Errorf("invalid action %q (want ALLOW | BLOCK | REDACT | INTERRUPT)", s)
+	}
+}
+
+// ToPolicySet builds an action-based gateway.PolicySet from the configured
+// policies. fallback is consulted for tools no rule matches (typically the
+// risk-based DefaultPolicy); pass nil to block unmatched tools (fail-closed).
+// Validate() should already have caught malformed entries; this is defensive.
+func (c *Config) ToPolicySet(fallback gateway.Policy) (*gateway.PolicySet, error) {
+	rules := make([]gateway.PolicyRule, 0, len(c.Policies))
+	for _, pd := range c.Policies {
+		action, err := parseAction(pd.Action)
+		if err != nil {
+			return nil, fmt.Errorf("policy %q: %w", pd.Name, err)
+		}
+		var timeout time.Duration
+		if pd.Timeout != "" {
+			timeout, err = time.ParseDuration(pd.Timeout)
+			if err != nil {
+				return nil, fmt.Errorf("policy %q: invalid timeout %q: %w", pd.Name, pd.Timeout, err)
+			}
+		}
+		rules = append(rules, gateway.PolicyRule{
+			Name:       pd.Name,
+			Tools:      pd.Tools,
+			Action:     action,
+			Risk:       gateway.RiskLevel(pd.Risk),
+			Inspection: pd.Inspection,
+			Timeout:    timeout,
+		})
+	}
+	return gateway.NewPolicySet(rules, fallback), nil
+}
+
+// HasPolicies reports whether action-based policies are configured. When false,
+// the sidecar uses the risk-based DefaultPolicy (fully backward-compatible).
+func (c *Config) HasPolicies() bool { return len(c.Policies) > 0 }

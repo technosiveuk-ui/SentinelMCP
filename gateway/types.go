@@ -118,6 +118,20 @@ type DecisionResult struct {
 	// RedactedArgs is populated when Decision == DecisionRedact.
 	// Maps argument field name to redacted value.
 	RedactedArgs map[string]string `json:"redacted_args,omitempty"`
+
+	// Inspection carries the pattern categories an action-based REDACT policy
+	// asks the DLP layer to scan for (e.g. "pii", "secrets"). Populated by
+	// PolicySet; the risk-based DefaultPolicy leaves it empty. Consumed by the
+	// inspection layer (Step 3); carried here so the decision is self-describing.
+	Inspection []string `json:"inspection,omitempty"`
+
+	// Timeout overrides the global interrupt timeout for an INTERRUPT decision
+	// (consumed by Step 5's approval-timeout / auto-block). Zero = use default.
+	Timeout time.Duration `json:"timeout,omitempty"`
+
+	// PolicyName names the action-based policy rule that produced this decision,
+	// surfaced in the audit log. Empty for risk-based (DefaultPolicy) decisions.
+	PolicyName string `json:"policy_name,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
