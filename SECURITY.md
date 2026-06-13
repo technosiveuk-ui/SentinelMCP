@@ -66,6 +66,20 @@ Out of scope:
   cannot silently downgrade protection.
 - **Sensitive values are never logged.** Matched DLP values are marked
   non-serializable and are excluded from audit and span output.
+- **Loopback-plaintext-default transport.** On loopback the sidecar may run
+  plaintext HTTP with optional auth (the host boundary carries trust). Off
+  loopback, inbound TLS and API-key authentication are required, and the sidecar
+  refuses to start if either is missing. See
+  [Transport Security](docs/transport-security.md).
+- **Fail-closed transport on both legs.** Outbound calls use TLS by default:
+  strict mode rejects plaintext and IP-literal upstreams at config load,
+  upstream certificates can be CA- or SPKI-pinned (`InsecureSkipVerify` is never
+  set), and a non-allowlisted egress host or unresolved credential blocks the
+  call. No path falls back to plaintext or anonymous access.
+- **Secrets at rest must be owner-only.** A `config.yaml` carrying
+  `admin_token`/`api_keys`, or a `secrets.yaml`, is refused at load if it is
+  group- or world-readable (mode must be `0600`); environment variables are the
+  recommended path for secrets in shared environments.
 - **Alpha caveat.** SentinelMCP is Alpha software and should not be your sole
   defense in a highly regulated production environment without thorough
   testing. See the project [README](README.md) for the current status.
