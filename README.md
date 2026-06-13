@@ -340,6 +340,25 @@ go test ./cmd/sentinelmcp/ -race -v
 go test ./adapter/eino/ -bench=. -benchmem
 ```
 
+### End-to-end validation
+
+The full enforcement surface is also validated live against a real MCP upstream,
+not only in unit tests. With the demo upstream running and a sidecar configured
+to proxy it (see [Quickstart](#quickstart); a plaintext `localhost` upstream
+needs `sidecar.strict: false`), the bundled client exercises every path:
+
+```bash
+go run ./cmd/upstream                  # demo upstream (echo_message, filesystem_read, exec_command)
+go run ./cmd/sentinelmcp -config ...   # sidecar proxy (point upstream_servers at :3001)
+go run ./cmd/testclient                # allow / redact / interrupt+resume — exits non-zero on any failure
+```
+
+The live run validates: **allow** (low-risk pass-through), **redact** (medium-risk
+DLP masking of secrets in the response), **interrupt + resume** (high-risk calls
+pause for approval and complete via the admin resume API), **fail-closed auth**
+(the resume endpoint rejects missing/invalid admin tokens with `401`), and **hot
+policy reload** (policy changes apply on config save, no restart).
+
 ---
 
 ## Contributing

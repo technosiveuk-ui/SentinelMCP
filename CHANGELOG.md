@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Audit event `latency_ms` now serializes as whole milliseconds. A bare `time.Duration` marshals as its nanosecond count, which made the `_ms` field's unit wrong (e.g. a ~13ms interrupt path reported as `13000000`). Fixed via `AuditEvent.MarshalJSON`; the Go field stays `time.Duration`.
+- Approval resume API (`POST /api/v1/approval/resume`) returns `410 Gone` for an unknown, already-resumed, or expired (auto-blocked) checkpoint. An absent or consumed approval target is a client condition, not a server fault; previously every resume rejection returned `500`.
+
 ## [0.2.0] - 2026-06-12
 
 ### Added
